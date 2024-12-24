@@ -22,7 +22,13 @@ final List<LatLng> mainKoreaPolygon = [
 ];
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  // 1) 운동 종료 시점에 상위에서 동작을 제어할 콜백
+  final VoidCallback? onStopWorkout;
+
+  const MapScreen({
+    super.key,
+    this.onStopWorkout,
+  });
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -97,6 +103,7 @@ class _MapScreenState extends State<MapScreen> {
       _isWorkoutStarted = true;
       _stopwatch.start();
     });
+    _updateElapsedTime();
 
     // 현재 위치 가져와 지도 이동
     final position = await _locationService.getCurrentPosition();
@@ -139,6 +146,8 @@ class _MapScreenState extends State<MapScreen> {
       _baseAltitude = null;
       _isPaused = false;
     });
+    // 2) 종료 시점에 콜백을 호출. -> WebViewAndMapScreen에서 _showWebView = true 로 복귀
+    widget.onStopWorkout?.call();
   }
 
   void _updateElapsedTime() {
@@ -401,6 +410,7 @@ class _MapScreenState extends State<MapScreen> {
                       style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                     const SizedBox(height: 16),
+                    
 
                     GridView.count(
                       shrinkWrap: true,

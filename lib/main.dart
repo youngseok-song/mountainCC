@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'models/location_data.dart';
-import 'screens/map_screen.dart';
+import 'screens/webview_and_map_screen.dart'; // 새로 만든 화면 import
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,7 +31,9 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
       debugShowCheckedModeBanner: false,
-      home: const MapScreen(),
+
+      // (중요) 기존에는 home: MapScreen() 이었을 텐데, 이제는 WebViewAndMapScreen()
+      home: const WebViewAndMapScreen(),
     );
   }
-} 
+}
