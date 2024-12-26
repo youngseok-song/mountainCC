@@ -1,3 +1,6 @@
+// android/settings.gradle
+import java.util.Properties
+
 pluginManagement {
     def flutterSdkPath = {
         def properties = new Properties()
@@ -13,13 +16,37 @@ pluginManagement {
         google()
         mavenCentral()
         gradlePluginPortal()
+
+        // ★ Transistorsoft의 maven 저장소 추가 필요할 경우:
+        // maven { url "https://maven.transistorsoft.com" }
+        //
+        // 그러나 일부 Flutter 버전에서는 여기(pluginManagement) 부분이
+        // plugin들(kotlin/android gradle plugin) 다운로드용으로만 쓰일 수 있습니다.
+        // 'dependencyResolutionManagement' 블록 아래에 넣는 방식이 더 표준적일 수 있음.
     }
 }
 
 plugins {
-    id "dev.flutter.flutter-plugin-loader" version "1.0.0"
-    id "com.android.application" version "8.2.1" apply false
-    id "org.jetbrains.kotlin.android" version "1.8.22" apply false
+    // Flutter 구조상 자동 생성되는 부분
+    id("dev.flutter.flutter-plugin-loader") version "1.0.0"
+    // Android Gradle Plugin (AGP) + Kotlin 버전
+    id("com.android.application") version "8.2.2" apply false
+    id("org.jetbrains.kotlin.android") version "2.0.0" apply false
 }
 
-include ":app"
+include(":app")
+
+
+// 만약 Flutter 3.x 구조에서 'dependencyResolutionManagement'를 쓰는 형태라면 아래처럼 할 수도 있음:
+/*
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        // Transistorsoft maven
+        maven { url "https://maven.transistorsoft.com" }
+    }
+}
+include(":app")
+*/

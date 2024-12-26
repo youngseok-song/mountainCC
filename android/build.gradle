@@ -1,29 +1,44 @@
+// android/build.gradle (프로젝트 루트)
+
 buildscript {
     repositories {
         google()
         mavenCentral()
+
+        // [중요] Transistorsoft maven (필요시 추가)
+        // [required] flutter_background_geolocation
+
     }
     dependencies {
-        // AGP 버전을 최신으로 업데이트 (8.2.1 이상)
-        classpath 'com.android.tools.build:gradle:8.2.1'
+        // Android Gradle Plugin
+        classpath "com.android.tools.build:gradle:8.2.2"
     }
 }
+
+// allprojects {} 블록은 Gradle 7~8 에서는 점차 사용이 줄고 있으나,
+// 기존 호환성 위해 남겨두는 경우가 많습니다.
 
 allprojects {
     repositories {
         google()
         mavenCentral()
+        // [중요] Transistorsoft maven
+        maven { url "${project(':flutter_background_geolocation').projectDir}/libs" }
+        maven { url 'https://developer.huawei.com/repo/' }
+        //[required] background_fetch
+        maven { url "${project(':background_fetch').projectDir}/libs" }
     }
 }
 
+// 공통 빌드 디렉토리 설정
 rootProject.buildDir = "../build"
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
-}
-subprojects {
+    // 필요하다면 아래처럼 eval dependency
     project.evaluationDependsOn(":app")
 }
 
+// clean task
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }
