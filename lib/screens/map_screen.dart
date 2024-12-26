@@ -1,4 +1,3 @@
-// screens/map_screen.dart
 import 'dart:math' as math;
 import 'dart:ui' as ui; // ClipPath용
 import 'package:flutter/material.dart';
@@ -22,13 +21,10 @@ final List<LatLng> mainKoreaPolygon = [
 ];
 
 class MapScreen extends StatefulWidget {
-  // 1) 운동 종료 시점에 상위에서 동작을 제어할 콜백
+  // 운동 종료 시점에 상위에서 동작을 제어할 콜백
   final VoidCallback? onStopWorkout;
 
-  const MapScreen({
-    super.key,
-    this.onStopWorkout,
-  });
+  const MapScreen({super.key, this.onStopWorkout});
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -61,58 +57,90 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
+
     // Hive에서 locationBox 가져오기
     final locationBox = Hive.box<LocationData>('locationBox');
     _locationService = LocationService(locationBox);
     _barometerService = BarometerService();
-
-    _requestLocationPermission();
   }
 
-  // 위치 권한 요청
-  Future<void> _requestLocationPermission() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("위치 서비스를 활성화해주세요."))
-      );
-      return;
+  // ------------------ (1) 권한 체크 함수 ------------------
+  Future<bool> _isAlwaysPermissionGranted() async {
+    final permission = await Geolocator.checkPermission();
+    // 이미 always 면 true
+    if (permission == LocationPermission.always) {
+      return true;
     }
-
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("위치 권한이 거부되었습니다."))
-        );
-        return;
-      }
+    // denied/whileInUse -> 한 번 request
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.whileInUse) {
+      final req = await Geolocator.requestPermission();
+      return (req == LocationPermission.always);
     }
-    if (permission == LocationPermission.deniedForever) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("위치 권한이 영구적으로 거부되었습니다."))
-      );
-      return;
-    }
+    // deniedForever or 기타 -> false
+    return false;
   }
 
-  // 운동 시작
+  // ------------------ (2) 운동 시작 버튼 눌렀을 때 ------------------
   void _startWorkout() async {
+    // 권한 체크
+    final hasAlways = await _isAlwaysPermissionGranted();
+
+    if (!hasAlways) {
+      // --> 팝업 보여주기
+      final goSettings = await showDialog<bool>(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text("위치 권한 필요"),
+            content: const Text(
+              "위치 권한을 '항상 허용'으로 설정해야 이 기능을 사용할 수 있습니다.\n"
+                  "앱 설정 화면으로 이동하시겠습니까?",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  // 취소
+                  Navigator.of(ctx).pop(false);
+                },
+                child: const Text("취소"),
+              ),
+              TextButton(
+                onPressed: () {
+                  // 확인
+                  Navigator.of(ctx).pop(true);
+                },
+                child: const Text("확인"),
+              ),
+            ],
+          );
+        },
+      );
+
+      // null 방지
+      final userSaidYes = goSettings ?? false;
+
+      if (userSaidYes) {
+        // "확인" 누름 -> 앱 정보 화면 띄우기
+        await Geolocator.openAppSettings();
+      }
+      // "취소" or "확인" 끝나면 그냥 종료 (운동 시작 안 함)
+      return;
+    }
+
+    // 여기까지 오면 “항상 허용”임 -> 실제 운동 로직
     setState(() {
       _isWorkoutStarted = true;
       _stopwatch.start();
     });
     _updateElapsedTime();
 
-    // 현재 위치 가져와 지도 이동
     final position = await _locationService.getCurrentPosition();
     setState(() {
       _currentPosition = position;
     });
     _mapController.move(LatLng(position.latitude, position.longitude), 15.0);
 
-    // 실시간 위치 추적
     _locationService.trackLocation((pos) {
       if (!mounted) return;
       setState(() {
@@ -121,12 +149,9 @@ class _MapScreenState extends State<MapScreen> {
         _updateCumulativeElevation(pos);
       });
     });
-
-    // 경과시간 업데이트
-    _updateElapsedTime();
   }
 
-  // 일시중지
+  // ------------------ (3) 운동 일시중지/종료 ------------------
   void _pauseWorkout() {
     setState(() {
       _stopwatch.stop();
@@ -134,7 +159,6 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
-  // 종료
   void _stopWorkout() {
     setState(() {
       _isWorkoutStarted = false;
@@ -146,10 +170,10 @@ class _MapScreenState extends State<MapScreen> {
       _baseAltitude = null;
       _isPaused = false;
     });
-    // 2) 종료 시점에 콜백을 호출. -> WebViewAndMapScreen에서 _showWebView = true 로 복귀
     widget.onStopWorkout?.call();
   }
 
+  // ------------------ (4) 스톱워치 시간 ------------------
   void _updateElapsedTime() {
     Future.delayed(const Duration(seconds: 1), () {
       if (_stopwatch.isRunning) {
@@ -169,6 +193,7 @@ class _MapScreenState extends State<MapScreen> {
     return "$hours:$minutes:$seconds";
   }
 
+  // ------------------ (5) 거리/고도/속도 계산 ------------------
   double _calculateDistance() {
     double totalDistance = 0.0;
     for (int i = 1; i < _polylinePoints.length; i++) {
@@ -205,7 +230,6 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   double _calculateCurrentAltitude(Position position) {
-    // 바로미터 사용 가능 시 가정
     if (_barometerService.isBarometerAvailable && _barometerService.currentPressure != null) {
       const double seaLevelPressure = 1013.25;
       double altitudeFromBarometer = 44330 *
@@ -216,6 +240,7 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  // ------------------ (6) UI 빌드 ------------------
   Widget _buildInfoTile(String title, String value) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -232,9 +257,7 @@ class _MapScreenState extends State<MapScreen> {
         width: MediaQuery.of(context).size.width * 0.4,
         height: 40,
         child: ElevatedButton(
-          onPressed: () {
-            _pauseWorkout();
-          },
+          onPressed: _pauseWorkout,
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.orangeAccent,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -246,7 +269,6 @@ class _MapScreenState extends State<MapScreen> {
       return Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // 재시작
           ElevatedButton(
             onPressed: () {
               setState(() {
@@ -262,7 +284,6 @@ class _MapScreenState extends State<MapScreen> {
             ),
             child: const Text("재시작 ▶", style: TextStyle(color: Colors.white, fontSize: 15)),
           ),
-          // 종료
           ElevatedButton(
             onPressed: _stopWorkout,
             style: ElevatedButton.styleFrom(
@@ -296,13 +317,12 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
             children: [
-              // (1) OSM 전 세계
+              // OSM 전 세계
               TileLayer(
                 urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                 subdomains: ['a','b','c'],
               ),
-
-              // (2) ClipPath로 한국만 tiles.osm.kr
+              // ClipPath로 한국만 tiles.osm.kr
               KoreaClipLayer(
                 polygon: mainKoreaPolygon,
                 child: TileLayer(
@@ -310,8 +330,7 @@ class _MapScreenState extends State<MapScreen> {
                   maxZoom: 19,
                 ),
               ),
-
-              // (3) 정확도 범위 Circle
+              // 정확도 범위 Circle
               if (_currentPosition != null)
                 CircleLayer(
                   circles: [
@@ -325,8 +344,7 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                   ],
                 ),
-
-              // (4) 현재 위치 마커
+              // 현재 위치 마커
               if (_currentPosition != null)
                 MarkerLayer(
                   markers: [
@@ -344,8 +362,7 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                   ],
                 ),
-
-              // (5) 경로 Polyline
+              // 경로 Polyline
               if (_polylinePoints.isNotEmpty)
                 PolylineLayer(
                   polylines: [
@@ -410,7 +427,6 @@ class _MapScreenState extends State<MapScreen> {
                       style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.black),
                     ),
                     const SizedBox(height: 16),
-                    
 
                     GridView.count(
                       shrinkWrap: true,
@@ -438,7 +454,6 @@ class _MapScreenState extends State<MapScreen> {
 }
 
 // ------------------ ClipPath classes ------------------
-
 class KoreaClipLayer extends StatelessWidget {
   final Widget child;
   final List<LatLng> polygon;
@@ -453,7 +468,7 @@ class KoreaClipLayer extends StatelessWidget {
   Widget build(BuildContext context) {
     final mapCamera = MapCamera.of(context);
     if (mapCamera == null) {
-      return child; // mapCamera 가져오기 불가 시, clip 없이 child 그대로
+      return child;
     }
 
     final ui.Path path = ui.Path();

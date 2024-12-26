@@ -1,71 +1,73 @@
+// screens/webview_and_map_screen.dart
 import 'package:flutter/material.dart';
-// 1) webview_flutter 4.x 이상 패키지
-import 'package:webview_flutter/webview_flutter.dart';
-
-import 'map_screen.dart'; // 기존 map_screen.dart (운동화면) import
+import 'package:flutter_inappwebview/flutter_inappwebview.dart'; // flutter_inappwebview 패키지 임포트
+import 'map_screen.dart'; // 지도/운동 화면
 
 class WebViewAndMapScreen extends StatefulWidget {
-  const WebViewAndMapScreen({Key? key}) : super(key: key);
+  const WebViewAndMapScreen({super.key});
 
   @override
   State<WebViewAndMapScreen> createState() => _WebViewAndMapScreenState();
 }
 
 class _WebViewAndMapScreenState extends State<WebViewAndMapScreen> {
+  // true 면 웹뷰 화면을 표시하고, false 면 지도 화면(MapScreen) 표시
   bool _showWebView = true;
-  // ↑ 처음에는 웹뷰(WebView)를 표시.
-  //   웹에서 '따라가기' 버튼을 누르면 -> _showWebView = false -> 지도(MapScreen) 화면으로 전환
 
-  late final WebViewController _webViewController;
-  // ↑ webview_flutter 4.x 버전에서 새롭게 도입된 WebViewController
-
-  @override
-  void initState() {
-    super.initState();
-
-    // 2) webview_flutter 4.x 방식:
-    //    컨트롤러를 먼저 생성하고,
-    //    자바스크립트 모드나 자바스크립트 채널을 설정한 후,
-    //    loadRequest(...) 로 URL 로드를 요청합니다.
-    _webViewController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted) // JS 허용
-      ..addJavaScriptChannel(
-        'StartWorkout',
-        onMessageReceived: (JavaScriptMessage message) {
-          // 웹에서 'window.StartWorkout.postMessage("start")'를 호출하면 여기로 들어옵니다.
-          if (message.message == 'start') {
-            setState(() {
-              // “따라가기” 버튼 클릭에 해당 → 지도 화면으로 전환
-              _showWebView = false;
-            });
-          }
-        },
-      )
-      ..loadRequest(
-        Uri.parse('https://outify-git-main-jeongdxxns-projects.vercel.app/'),
-      );
-  }
+  // InAppWebViewController: 웹뷰를 제어할 수 있는 컨트롤러 (JS 실행 등)
+  InAppWebViewController? _webViewController;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // 3) _showWebView 값에 따라,
-      //    - true면 WebViewWidget 보여주고
-      //    - false면 MapScreen(운동화면) 보여줌
+      // 전체 레이아웃은 Stack으로 겹쳐 놓고, 조건에 따라 위젯을 보여준다.
       body: Stack(
         children: [
-          // (1) _showWebView = true => WebView 표시
+          // (1) 웹뷰 표시 영역
           if (_showWebView)
-          // WebView(...) 대신 WebViewWidget(controller: ...) 사용
-            WebViewWidget(controller: _webViewController),
+            InAppWebView(
+              initialSettings: InAppWebViewSettings(
+                javaScriptEnabled: true,
+                // 기타 cross-platform 옵션들
+              ),
 
-          // (2) _showWebView = false => MapScreen 표시
+              // 첫 로딩할 URL
+              initialUrlRequest: URLRequest(
+                url: WebUri('https://mountaincc.co.kr/version-test'),
+              ),
+
+              // 웹뷰가 생성된 직후 호출
+              onWebViewCreated: (controller) {
+                // 인스턴스 보관 → 이후 JS 실행 등에 사용할 수 있음
+                _webViewController = controller;
+
+                // (2) JS → Flutter 로 메시지를 전달할 핸들러 등록
+                // - JS 측에서 window.flutter_inappwebview.callHandler('StartWorkout', 'start') 호출 시
+                //   여기 callback 이 실행된다.
+                controller.addJavaScriptHandler(
+                  handlerName: 'StartWorkout',
+                  callback: (args) {
+                    // args는 JS에서 넘긴 인자 리스트, 예) ['start']
+                    if (args.isNotEmpty && args[0] == 'start') {
+                      // 웹에서 "start" 라는 메시지를 넘기면 → 지도화면으로 전환
+                      setState(() {
+                        _showWebView = false;
+                      });
+                    }
+                    // 필요한 경우, Flutter가 JS 쪽에 응답(리턴값)을 줄 수 있음
+                    return "OK from Flutter";
+                  },
+                );
+              },
+            ),
+
+          // (3) 지도(운동) 화면
+          // - _showWebView = false 일 때만 표시
           if (!_showWebView)
             MapScreen(
-              // 운동 종료 시 다시 웹뷰로 돌아가는(표시하는) 콜백
+              // MapScreen에서 "종료" 버튼 등을 누르면 다시 웹뷰로 돌아가기
               onStopWorkout: () {
                 setState(() {
-                  // 운동이 끝나면 웹뷰 다시 켜기
                   _showWebView = true;
                 });
               },
