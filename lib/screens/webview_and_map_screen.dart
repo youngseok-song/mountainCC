@@ -33,7 +33,7 @@ class _WebViewAndMapScreenState extends State<WebViewAndMapScreen> {
 
               // 첫 로딩할 URL
               initialUrlRequest: URLRequest(
-                url: WebUri('https://mountaincc.co.kr/version-test'),
+                url: WebUri('https://outify-git-main-jeongdxxns-projects.vercel.app/'),
               ),
 
               // 웹뷰가 생성된 직후 호출

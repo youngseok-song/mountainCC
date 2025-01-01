@@ -34,7 +34,7 @@ packages:
     source: hosted
     version: "2.11.0"
   background_fetch:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: background_fetch
       sha256: e9f26ae54d88310b7ac2a68f2f9fcee0081a4d5f11100f233a70702021e7ac4f
@@ -222,14 +222,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.16.6"
-  flutter_barometer_plugin:
-    dependency: "direct main"
-    description:
-      name: flutter_barometer_plugin
-      sha256: b54c25da8acbce2686c411adb82eff05e99e8e2b221a7c731397e2281250687f
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.0.1+3"
   flutter_inappwebview:
     dependency: "direct main"
     description:

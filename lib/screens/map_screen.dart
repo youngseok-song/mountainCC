@@ -5,12 +5,15 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:hive/hive.dart';
 
+// [중요] BarometerService 제거. 아래 import도 제거.
+// import '../service/barometer_service.dart';
+
 import 'package:flutter_background_geolocation/flutter_background_geolocation.dart' as bg;
 
 import '../models/location_data.dart';
 import '../service/location_service.dart';
-import '../service/barometer_service.dart';
 
+// ------------------ Clip용 폴리곤 (한국)
 final List<LatLng> mainKoreaPolygon = [
   LatLng(33.0, 124.0),
   LatLng(38.5, 124.0),
@@ -32,7 +35,7 @@ class _MapScreenState extends State<MapScreen> {
   final MapController _mapController = MapController();
 
   late LocationService _locationService;
-  late BarometerService _barometerService;
+  // BarometerService _barometerService; // (제거)
 
   // flutter_background_geolocation.Location 기반의 현재 위치
   bg.Location? _currentBgLocation;
@@ -55,7 +58,9 @@ class _MapScreenState extends State<MapScreen> {
     super.initState();
     final locationBox = Hive.box<LocationData>('locationBox');
     _locationService = LocationService(locationBox);
-    _barometerService = BarometerService();
+
+    // (바로미터 제거)
+    // _barometerService = BarometerService();
   }
 
   // ------------------ (1) 운동 시작 ------------------
@@ -66,7 +71,7 @@ class _MapScreenState extends State<MapScreen> {
     });
     _updateElapsedTime();
 
-    // 위치추적 시작 (백그라운드)
+    // flutter_background_geolocation 시작
     await _locationService.startBackgroundGeolocation((bg.Location loc) {
       if (!mounted) return;
       setState(() {
@@ -75,7 +80,7 @@ class _MapScreenState extends State<MapScreen> {
         _updateCumulativeElevation(loc);
       });
 
-      // 지도 이동 (맵이 준비된 상태인지 확인)
+      // 지도 이동 (맵이 준비되었는지 확인)
       if (_mapIsReady) {
         _mapController.move(
           LatLng(loc.coords!.latitude, loc.coords!.longitude),
@@ -166,20 +171,11 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  // ------------------ (바로미터 제거) ------------------
   double _calculateCurrentAltitude(bg.Location location) {
+    // 그냥 GPS altitude만 사용
     double gpsAltitude = location.coords?.altitude ?? 0.0;
-    if (_barometerService.isBarometerAvailable &&
-        _barometerService.currentPressure != null) {
-      const double seaLevelPressure = 1013.25;
-      double altitudeFromBarometer = 44330 *
-          (1.0 -
-              math.pow(
-                  (_barometerService.currentPressure! / seaLevelPressure),
-                  0.1903) as double);
-      return (gpsAltitude + altitudeFromBarometer) / 2;
-    } else {
-      return gpsAltitude;
-    }
+    return gpsAltitude;
   }
 
   // ------------------ (5) UI 빌드 ------------------
@@ -252,7 +248,6 @@ class _MapScreenState extends State<MapScreen> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              // 여기가 핵심: onMapReady
               onMapReady: () {
                 setState(() {
                   _mapIsReady = true;
@@ -265,7 +260,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
             children: [
-              // OSM 기본 타일
+              // 기본 타일
               TileLayer(
                 urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                 subdomains: ['a','b','c'],
@@ -283,8 +278,10 @@ class _MapScreenState extends State<MapScreen> {
                 CircleLayer(
                   circles: [
                     CircleMarker(
-                      point: LatLng(_currentBgLocation!.coords!.latitude,
-                          _currentBgLocation!.coords!.longitude),
+                      point: LatLng(
+                        _currentBgLocation!.coords!.latitude,
+                        _currentBgLocation!.coords!.longitude,
+                      ),
                       radius: _currentBgLocation?.coords?.accuracy ?? 5.0,
                       useRadiusInMeter: true,
                       color: Colors.blue.withOpacity(0.1),
@@ -298,8 +295,10 @@ class _MapScreenState extends State<MapScreen> {
                 MarkerLayer(
                   markers: [
                     Marker(
-                      point: LatLng(_currentBgLocation!.coords!.latitude,
-                          _currentBgLocation!.coords!.longitude),
+                      point: LatLng(
+                        _currentBgLocation!.coords!.latitude,
+                        _currentBgLocation!.coords!.longitude,
+                      ),
                       width: 12.0,
                       height: 12.0,
                       child: Container(
@@ -329,7 +328,9 @@ class _MapScreenState extends State<MapScreen> {
           // 운동 시작 전
           if (!_isWorkoutStarted)
             Positioned(
-              bottom: 20, left: 0, right: 0,
+              bottom: 20,
+              left: 0,
+              right: 0,
               child: Center(
                 child: SizedBox(
                   width: MediaQuery.of(context).size.width * 0.8,
@@ -353,7 +354,9 @@ class _MapScreenState extends State<MapScreen> {
           // 운동 중 하단 패널
           if (_isWorkoutStarted)
             Positioned(
-              bottom: 0, left: 0, right: 0,
+              bottom: 0,
+              left: 0,
+              right: 0,
               child: Container(
                 padding: const EdgeInsets.all(16),
                 decoration: const BoxDecoration(
@@ -387,7 +390,10 @@ class _MapScreenState extends State<MapScreen> {
                       children: [
                         _buildInfoTile("📍 거리", "${_calculateDistance().toStringAsFixed(1)} km"),
                         _buildInfoTile("⚡ 속도", "${_calculateAverageSpeed().toStringAsFixed(2)} km/h"),
-                        _buildInfoTile("🏠 현재고도", "${_currentBgLocation?.coords?.altitude?.toInt() ?? 0} m"),
+                        _buildInfoTile(
+                          "🏠 현재고도",
+                          "${_currentBgLocation?.coords?.altitude?.toInt() ?? 0} m",
+                        ),
                         _buildInfoTile("📈 누적상승고도", "${_cumulativeElevation.toStringAsFixed(1)} m"),
                       ],
                     ),
@@ -403,7 +409,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
-// ------------------ ClipPath ------------------
+// ------------------ ClipPath classes ------------------
 class KoreaClipLayer extends StatelessWidget {
   final Widget child;
   final List<LatLng> polygon;
