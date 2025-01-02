@@ -38,8 +38,9 @@ class LocationService {
     // 2) ready
     await bg.BackgroundGeolocation.ready(
       bg.Config(
+        disableLocationAuthorizationAlert: true,  // **자동 권한 요청 비활성화**
         desiredAccuracy: bg.Config.DESIRED_ACCURACY_HIGH,
-        distanceFilter: 3.0,   // 10m 간격으로 onLocation 콜백
+        distanceFilter: 1.5,   // 1.5m 간격으로 onLocation 콜백
         stopOnTerminate: false, // 앱 종료시 추적 중단 여부
         startOnBoot: true,      // 부팅 후 자동 시작
         debug: false,           // 디버그 모드 (콘솔에 로그)
@@ -60,7 +61,7 @@ class LocationService {
     _isTracking = false;
   }
 
-  /// 10미터 이상 이동 시 위치 정보를 Hive에 저장
+  /// 5미터 이상 이동 시 위치 정보를 Hive에 저장
   void _maybeSavePosition(bg.Location location) {
 
     final LatLng currentLatLng =
@@ -78,8 +79,8 @@ class LocationService {
       currentLatLng,
     );
 
-    // 10m 이상 이동했으면 저장
-    if (distanceMeter >= 3.0) {
+    // 5m 이상 이동했으면 저장
+    if (distanceMeter >= 5.0) {
       _saveToHive(currentLatLng, location.coords.altitude);
       lastSavedPosition = currentLatLng;
     }
