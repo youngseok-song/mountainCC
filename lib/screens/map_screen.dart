@@ -1,13 +1,11 @@
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:permission_handler/permission_handler.dart'; // 권한 체크를 위해 추가
 import 'package:hive/hive.dart';
 
-// [중요] BarometerService 제거. 아래 import도 제거.
-// import '../service/barometer_service.dart';
-
+// (중요) flutter_background_geolocation 관련 import
 import 'package:flutter_background_geolocation/flutter_background_geolocation.dart' as bg;
 
 import '../models/location_data.dart';
@@ -35,7 +33,7 @@ class _MapScreenState extends State<MapScreen> {
   final MapController _mapController = MapController();
 
   late LocationService _locationService;
-  // BarometerService _barometerService; // (제거)
+  // flutter_background_geolocation으로 동작하는 LocationService
 
   // flutter_background_geolocation.Location 기반의 현재 위치
   bg.Location? _currentBgLocation;
@@ -50,47 +48,135 @@ class _MapScreenState extends State<MapScreen> {
   double _cumulativeElevation = 0.0;
   double? _baseAltitude;
 
-  // (중요) flutter_map 5.x 이상에서 onMapReady를 활용하기 위한 변수
+  // (map이 준비된 후에 move하려면 필요)
   bool _mapIsReady = false;
 
   @override
   void initState() {
     super.initState();
+
+    // Hive 박스 열어서 LocationService 초기화
     final locationBox = Hive.box<LocationData>('locationBox');
     _locationService = LocationService(locationBox);
-
-    // (바로미터 제거)
-    // _barometerService = BarometerService();
   }
 
-  // ------------------ (1) 운동 시작 ------------------
-  void _startWorkout() async {
+  /// (1) 백그라운드 위치 권한(항상 허용) 체크/요청
+  Future<bool> _checkAndRequestAlwaysPermission() async {
+    // permission_handler 패키지를 통해 '항상 허용' 상태인지 확인
+    if (await Permission.locationAlways.isGranted) {
+      // 이미 항상 허용 상태라면 바로 true
+      return true;
+    }
+
+    // 아직 권한 없으면 요청
+    final status = await Permission.locationAlways.request();
+
+    if (status == PermissionStatus.granted) {
+      // 허용됨
+      return true;
+    } else if (status == PermissionStatus.permanentlyDenied) {
+      // 사용자가 '다시 묻지 않기' 등을 눌러 완전히 거부한 상태
+      // → 앱 설정 화면으로 안내
+      _showNeedPermissionDialog();
+      return false;
+    }
+    // 그 외(denied, restricted)도 false 반환
+    return false;
+  }
+
+  /// 권한이 거부되었을 때, 설정 화면으로 이동할지 물어보는 다이얼로그
+  Future<void> _showNeedPermissionDialog() async {
+    final goSettings = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text("위치 권한 필요"),
+          content: const Text(
+            "항상 허용 권한이 필요합니다.\n"
+                "앱 설정 화면에서 '항상 허용'으로 변경해주세요.",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text("취소"),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text("설정으로 이동"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (goSettings == true) {
+      // 사용자가 '설정으로 이동' 선택 시
+      await openAppSettings();
+    }
+  }
+
+  /// (2) 운동 시작 로직
+  Future<void> _startWorkout() async {
+    // 1) 먼저 백그라운드 위치(항상 허용) 권한 체크
+    final hasAlways = await _checkAndRequestAlwaysPermission();
+    if (!hasAlways) {
+      return;
+    }
+    // 이후 백그라운드 지오로케이션 시작, setState() 등
+    // 2) 운동 시작 상태/UI 세팅
     setState(() {
       _isWorkoutStarted = true;
       _stopwatch.start();
     });
     _updateElapsedTime();
 
-    // flutter_background_geolocation 시작
-    await _locationService.startBackgroundGeolocation((bg.Location loc) {
-      if (!mounted) return;
-      setState(() {
-        _currentBgLocation = loc;
-        _polylinePoints.add(LatLng(loc.coords!.latitude, loc.coords!.longitude));
-        _updateCumulativeElevation(loc);
-      });
+    // 3) flutter_background_geolocation 시작
+    await _locationService.startBackgroundGeolocation(
+          (bg.Location loc) {
+        // 위치가 업데이트될 때마다 실행되는 콜백
+        if (!mounted) return;
+        setState(() {
+          _currentBgLocation = loc;
+          _polylinePoints.add(
+            LatLng(loc.coords.latitude, loc.coords.longitude),
+          );
+          _updateCumulativeElevation(loc);
+        });
 
-      // 지도 이동 (맵이 준비되었는지 확인)
-      if (_mapIsReady) {
-        _mapController.move(
-          LatLng(loc.coords!.latitude, loc.coords!.longitude),
-          15.0,
-        );
-      }
+        // 맵이 준비된 상태면 카메라 이동
+        if (_mapIsReady) {
+          _mapController.move(
+            LatLng(loc.coords.latitude, loc.coords.longitude),
+            15.0,
+          );
+        }
+      },
+    );
+
+    // 4) 현재 위치를 즉시 받아서 맵 이동 (바로 callback 이전에)
+    //    - flutter_background_geolocation에는 getCurrentPosition() 등이 있음
+    final currentLoc = await bg.BackgroundGeolocation.getCurrentPosition(
+      desiredAccuracy: bg.Config.DESIRED_ACCURACY_HIGH,
+      // ↓ 'timeout'은 초 단위, 예: 30
+      timeout: 30,
+    );
+    if (!mounted) return;
+    setState(() {
+      _currentBgLocation = currentLoc;
+      _polylinePoints.add(
+        LatLng(currentLoc.coords.latitude, currentLoc.coords.longitude),
+      );
     });
+    // 맵 이동
+    if (_mapIsReady) {
+      _mapController.move(
+        LatLng(currentLoc.coords.latitude, currentLoc.coords.longitude),
+        15.0,
+      );
+    }
   }
 
-  // ------------------ (2) 일시중지 / 종료 ------------------
+  /// (3) 운동 일시중지/종료
   void _pauseWorkout() {
     setState(() {
       _stopwatch.stop();
@@ -98,7 +184,7 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
-  void _stopWorkout() async {
+  Future<void> _stopWorkout() async {
     setState(() {
       _isWorkoutStarted = false;
       _stopwatch.stop();
@@ -111,13 +197,14 @@ class _MapScreenState extends State<MapScreen> {
       _currentBgLocation = null;
     });
 
-    // 백그라운드 위치추적 중지
+    // 백그라운드 위치 추적 중지
     await _locationService.stopBackgroundGeolocation();
 
+    // onStopWorkout 콜백 호출(웹뷰 화면으로 복귀 등)
     widget.onStopWorkout?.call();
   }
 
-  // ------------------ (3) 스톱워치 ------------------
+  /// (4) 스톱워치
   void _updateElapsedTime() {
     Future.delayed(const Duration(seconds: 1), () {
       if (_stopwatch.isRunning) {
@@ -137,7 +224,7 @@ class _MapScreenState extends State<MapScreen> {
     return "$hours:$minutes:$seconds";
   }
 
-  // ------------------ (4) 거리/고도/속도 계산 ------------------
+  /// (5) 거리/고도/속도 계산
   double _calculateDistance() {
     double totalDistance = 0.0;
     for (int i = 1; i < _polylinePoints.length; i++) {
@@ -157,28 +244,23 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _updateCumulativeElevation(bg.Location location) {
-    double currentAltitude = _calculateCurrentAltitude(location);
+    final double currentAltitude = location.coords.altitude;
     if (_baseAltitude == null) {
       _baseAltitude = currentAltitude;
     } else {
       double elevationDifference = currentAltitude - _baseAltitude!;
       if (elevationDifference > 3.0) {
+        // 3m 이상 상승 시 누적 상승고도에 추가
         _cumulativeElevation += elevationDifference;
         _baseAltitude = currentAltitude;
       } else if (elevationDifference < 0) {
+        // 고도가 하강하면 base 갱신
         _baseAltitude = currentAltitude;
       }
     }
   }
 
-  // ------------------ (바로미터 제거) ------------------
-  double _calculateCurrentAltitude(bg.Location location) {
-    // 그냥 GPS altitude만 사용
-    double gpsAltitude = location.coords?.altitude ?? 0.0;
-    return gpsAltitude;
-  }
-
-  // ------------------ (5) UI 빌드 ------------------
+  /// (6) UI
   Widget _buildInfoTile(String title, String value) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -191,6 +273,7 @@ class _MapScreenState extends State<MapScreen> {
 
   Widget _buildPauseResumeButtons() {
     if (!_isPaused) {
+      // (A) 일시중지 버튼
       return SizedBox(
         width: MediaQuery.of(context).size.width * 0.4,
         height: 40,
@@ -198,12 +281,15 @@ class _MapScreenState extends State<MapScreen> {
           onPressed: _pauseWorkout,
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.orangeAccent,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
           child: const Text("중지 ⏸️", style: TextStyle(color: Colors.white, fontSize: 15)),
         ),
       );
     } else {
+      // (B) 재시작 & 종료 버튼
       return Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
@@ -240,7 +326,7 @@ class _MapScreenState extends State<MapScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("운동 기록 + Clip OSM (onMapReady)"),
+        title: const Text("운동 기록 + Clip OSM (BackgroundGeo)"),
       ),
       body: Stack(
         children: [
@@ -248,6 +334,7 @@ class _MapScreenState extends State<MapScreen> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
+              // 맵 준비 완료 시점 체크
               onMapReady: () {
                 setState(() {
                   _mapIsReady = true;
@@ -260,7 +347,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
             children: [
-              // 기본 타일
+              // 기본 OSM 타일
               TileLayer(
                 urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                 subdomains: ['a','b','c'],
@@ -279,12 +366,13 @@ class _MapScreenState extends State<MapScreen> {
                   circles: [
                     CircleMarker(
                       point: LatLng(
-                        _currentBgLocation!.coords!.latitude,
-                        _currentBgLocation!.coords!.longitude,
+                        _currentBgLocation!.coords.latitude,
+                        _currentBgLocation!.coords.longitude,
                       ),
-                      radius: _currentBgLocation?.coords?.accuracy ?? 5.0,
+                      // flutter_background_geolocation.Location 에서 accuracy가 null일 수 있으므로 ?? 5.0
+                      radius: _currentBgLocation?.coords.accuracy ?? 5.0,
                       useRadiusInMeter: true,
-                      color: Colors.blue.withOpacity(0.1),
+                      color: Colors.blue.withAlpha(25),
                       borderStrokeWidth: 2.0,
                       borderColor: Colors.blue,
                     ),
@@ -296,8 +384,8 @@ class _MapScreenState extends State<MapScreen> {
                   markers: [
                     Marker(
                       point: LatLng(
-                        _currentBgLocation!.coords!.latitude,
-                        _currentBgLocation!.coords!.longitude,
+                        _currentBgLocation!.coords.latitude,
+                        _currentBgLocation!.coords.longitude,
                       ),
                       width: 12.0,
                       height: 12.0,
@@ -325,7 +413,7 @@ class _MapScreenState extends State<MapScreen> {
             ],
           ),
 
-          // 운동 시작 전
+          // (A) 운동 시작 전 → "운동 시작" 버튼
           if (!_isWorkoutStarted)
             Positioned(
               bottom: 20,
@@ -339,7 +427,9 @@ class _MapScreenState extends State<MapScreen> {
                     onPressed: _startWorkout,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.greenAccent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
                       elevation: 5.0,
                     ),
                     child: const Text(
@@ -351,7 +441,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
 
-          // 운동 중 하단 패널
+          // (B) 운동 중 → 하단 패널 표시
           if (_isWorkoutStarted)
             Positioned(
               bottom: 0,
@@ -388,13 +478,23 @@ class _MapScreenState extends State<MapScreen> {
                       crossAxisSpacing: 12,
                       childAspectRatio: 3.5,
                       children: [
-                        _buildInfoTile("📍 거리", "${_calculateDistance().toStringAsFixed(1)} km"),
-                        _buildInfoTile("⚡ 속도", "${_calculateAverageSpeed().toStringAsFixed(2)} km/h"),
+                        _buildInfoTile(
+                          "📍 거리",
+                          "${_calculateDistance().toStringAsFixed(1)} km",
+                        ),
+                        _buildInfoTile(
+                          "⚡ 속도",
+                          "${_calculateAverageSpeed().toStringAsFixed(2)} km/h",
+                        ),
                         _buildInfoTile(
                           "🏠 현재고도",
-                          "${_currentBgLocation?.coords?.altitude?.toInt() ?? 0} m",
+                          // coords.altitude가 null일 수 있어 0처리
+                          "${(_currentBgLocation?.coords.altitude ?? 0).toInt()} m",
                         ),
-                        _buildInfoTile("📈 누적상승고도", "${_cumulativeElevation.toStringAsFixed(1)} m"),
+                        _buildInfoTile(
+                          "📈 누적상승고도",
+                          "${_cumulativeElevation.toStringAsFixed(1)} m",
+                        ),
                       ],
                     ),
                     const SizedBox(height: 16),
@@ -423,9 +523,6 @@ class KoreaClipLayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mapCamera = MapCamera.of(context);
-    if (mapCamera == null) {
-      return child;
-    }
 
     final ui.Path path = ui.Path();
     if (polygon.isNotEmpty) {
@@ -451,6 +548,7 @@ class _KoreaClipper extends CustomClipper<ui.Path> {
 
   @override
   ui.Path getClip(Size size) => path;
+
   @override
   bool shouldReclip(_KoreaClipper oldClipper) => true;
 }

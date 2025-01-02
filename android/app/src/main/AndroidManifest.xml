@@ -48,7 +48,7 @@
             android:value="2" />
 
         <!-- (유료 버전) Android License Key -->
-        <!--<meta-data
+        <!-- <meta-data
             android:name="com.transistorsoft.locationmanager.license"
             android:value="YOUR-ANDROID-LICENSE-KEY" /> -->
 

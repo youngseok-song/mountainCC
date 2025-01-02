@@ -17,7 +17,6 @@ apply from: "${background_geolocation.projectDir}/background_geolocation.gradle"
 android {
     // (Flutter 3.x 이상) namespace를 직접 지정
     namespace = "com.example.mountaincc"
-
     // compileSdk: 보통 33 혹은 34
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion

@@ -39,7 +39,7 @@ class LocationService {
     await bg.BackgroundGeolocation.ready(
       bg.Config(
         desiredAccuracy: bg.Config.DESIRED_ACCURACY_HIGH,
-        distanceFilter: 10.0,   // 10m 간격으로 onLocation 콜백
+        distanceFilter: 3.0,   // 10m 간격으로 onLocation 콜백
         stopOnTerminate: false, // 앱 종료시 추적 중단 여부
         startOnBoot: true,      // 부팅 후 자동 시작
         debug: false,           // 디버그 모드 (콘솔에 로그)
@@ -62,13 +62,12 @@ class LocationService {
 
   /// 10미터 이상 이동 시 위치 정보를 Hive에 저장
   void _maybeSavePosition(bg.Location location) {
-    if (location.coords == null) return;
 
     final LatLng currentLatLng =
-    LatLng(location.coords!.latitude, location.coords!.longitude);
+    LatLng(location.coords.latitude, location.coords.longitude);
 
     if (lastSavedPosition == null) {
-      _saveToHive(currentLatLng, location.coords!.altitude ?? 0.0);
+      _saveToHive(currentLatLng, location.coords.altitude);
       lastSavedPosition = currentLatLng;
       return;
     }
@@ -80,8 +79,8 @@ class LocationService {
     );
 
     // 10m 이상 이동했으면 저장
-    if (distanceMeter >= 10.0) {
-      _saveToHive(currentLatLng, location.coords!.altitude ?? 0.0);
+    if (distanceMeter >= 3.0) {
+      _saveToHive(currentLatLng, location.coords.altitude);
       lastSavedPosition = currentLatLng;
     }
   }
