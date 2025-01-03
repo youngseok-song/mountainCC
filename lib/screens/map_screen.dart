@@ -325,7 +325,6 @@ class _MapScreenState extends State<MapScreen> {
                 urlTemplate: 'https://tiles.osm.kr/hot/{z}/{x}/{y}.png',
                 maxZoom: 19,
               ),
-
               // 한국 지도의 클리핑 레이어
               KoreaClipLayer(
                 polygon: mainKoreaPolygon,
@@ -558,8 +557,8 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
-// ----------------------------------
-// Clip classes (한국 지도 일부만 보이게 하는 기능)
+// -------------------------------------------------------
+//  ClipPath classes : 한국 영역
 class KoreaClipLayer extends StatelessWidget {
   final Widget child;
   final List<LatLng> polygon;
@@ -597,7 +596,7 @@ class _KoreaClipper extends CustomClipper<ui.Path> {
 
   @override
   ui.Path getClip(Size size) => path;
-
   @override
   bool shouldReclip(_KoreaClipper oldClipper) => true;
 }
+
