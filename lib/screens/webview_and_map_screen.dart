@@ -1,4 +1,5 @@
 // screens/webview_and_map_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart'; // flutter_inappwebview 패키지 임포트
 import 'map_screen.dart'; // 지도/운동 화면

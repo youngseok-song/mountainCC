@@ -1,4 +1,5 @@
 // models/location_data.dart
+
 import 'package:hive/hive.dart';
 
 // 아래 part 선언은 build_runner를 통해 자동 생성될 Adapter 파일을 지정하는 것입니다.
