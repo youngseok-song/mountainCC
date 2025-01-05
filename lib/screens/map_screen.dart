@@ -1,28 +1,35 @@
+// ---------------------------------------------------
+// screens/map_screen.dart
+// ---------------------------------------------------
+// flutter_map + BackgroundGeolocation + MovementService 조합으로
+// 실제 지도 표시, 운동 시작/중지/일시정지, 고도/거리/속도 등 UI를 표현.
+//
+// 이 예시에서는 "초기 오프셋"을 첫 위치를 가져온 뒤에
+//   _movementService.setInitialBaroOffsetIfPossible(gpsAlt)
+// 로 호출함으로써, Barometer와 GPS 차이를 크게 줄인다.
+
 import 'dart:async';
-import 'dart:ui' as ui;
-import 'package:flutter/material.dart';
+import 'dart:ui' as ui;        // ClipPath, Path 사용 시 필요
+
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:hive/hive.dart';
+
+import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_compass/flutter_compass.dart';
+
 import 'package:flutter_background_geolocation/flutter_background_geolocation.dart' as bg;
 
-import '../models/location_data.dart'; // 위치 데이터 저장로직
-import '../service/location_service.dart'; // 위치 로직
-import '../service/movement_service.dart'; // 운동 로직
 
+import '../models/location_data.dart';
+import '../service/location_service.dart';    // BG start/stop + Hive 저장
+import '../service/movement_service.dart';    // 폴리라인, 스톱워치, 고도 계산 등
 import 'dart:math' as math;
 
-/*
- * MapScreen
- *  - flutter_map 으로 지도 표시
- *  - 운동 시작/일시중지/종료
- *  - BackgroundGeolocation 권한 체크 + 시작/중지
- *  - 카운트다운 후에 MovementService에 위치 전달
- *  - [NEW] Marker를 회전시켜 방향 표시(삼각형 아이콘)
- */
 
-// 예시: 한반도 근사 폴리곤 (clip)
+// ----------------------------------
+// 예: 한반도 근사 폴리곤 (clip)
 final List<LatLng> mainKoreaPolygon = [
   LatLng(33.0, 124.0),
   LatLng(38.5, 124.0),
@@ -32,7 +39,9 @@ final List<LatLng> mainKoreaPolygon = [
   LatLng(32.0, 127.0),
 ];
 
+// MapScreen 위젯
 class MapScreen extends StatefulWidget {
+  // onStopWorkout: 운동 종료 후 WebView 등 다른 화면으로 돌아갈 때 호출
   final VoidCallback? onStopWorkout;
   const MapScreen({super.key, this.onStopWorkout});
 
@@ -41,45 +50,77 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  // (1) 지도 컨트롤러
+  // (A) 지도 컨트롤러
   final MapController _mapController = MapController();
-  bool _mapIsReady = false;
+  bool _mapIsReady = false; // onMapReady 콜백에서 true로 바뀜
 
-  // (2) Service
-  late LocationService _locationService;
-  late MovementService _movementService; // 새로 추가
+  // (B) Service 객체
+  late LocationService _locationService;  // BG 위치추적, Hive 저장
+  late MovementService _movementService;  // 운동(Baro/GPS 고도, 폴리라인, 스톱워치 등)
 
-  // (3) 현재 위치
+  // (C) 현재 BG plugin이 넘겨준 위치
   bg.Location? _currentBgLocation;
 
-  // (4) 운동 상태
-  bool _isWorkoutStarted = false;
-  bool _isPaused = false;
-  String _elapsedTime = "00:00:00";
+  // (D) 운동 상태
+  bool _isWorkoutStarted = false;   // 운동 중 여부
+  bool _isStartingWorkout = false;  // 운동 시작 절차 진행 중
+  bool _isPaused = false;           // 일시중지 상태
+  String _elapsedTime = "00:00:00"; // 스톱워치 UI용
 
-  // 첫 위치 & 카운트다운
-  bool _isFirstFixFound = false;
-  bool _inCountdown = false;
-  int _countdownValue = 10;
-  bool _ignoreInitialData = true;
+  // -----------------------------------------
+  // (추가) compass 사용
+  // -----------------------------------------
+  StreamSubscription<CompassEvent>? _compassSub;
+  double? _compassHeading; // 도(0=북, 90=동, 180=남, 270=서)
 
   @override
   void initState() {
     super.initState();
-    // Hive box -> locationService
+
+    // Hive box (locationBox) 열기
     final locationBox = Hive.box<LocationData>('locationBox');
     _locationService = LocationService(locationBox);
 
-    // movementService 초기화
+    // MovementService 초기화
     _movementService = MovementService();
+
+  }
+
+  @override
+  void dispose() {
+    // compass 해제
+    _compassSub?.cancel();
+    _compassSub = null;
+    super.dispose();
+  }
+
+  void _startCompass() {
+    // flutter_compass의 이벤트 스트림 구독
+    _compassSub = FlutterCompass.events!.listen((CompassEvent event) {
+      // event.heading: 0 ~ 360 (double)
+      if (event.heading != null) {
+        setState(() {
+          _compassHeading = event.heading; // 단위: 도
+        });
+      }
+    });
+  }
+
+  void _stopCompass() {
+    _compassSub?.cancel();
+    _compassSub = null;
   }
 
   // ------------------------------------------------------------
-  // (A) 위치 권한 체크
+  // (1) 위치 권한 체크 (항상 허용)
+  // ------------------------------------------------------------
   Future<bool> _checkAndRequestAlwaysPermission() async {
+    // 이미 권한 있으면 true
     if (await Permission.locationAlways.isGranted) {
       return true;
     }
+
+    // 권한 요청
     final status = await Permission.locationAlways.request();
     if (status.isGranted) {
       return true;
@@ -89,6 +130,7 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  // 권한 필요 팝업
   Future<void> _showNeedPermissionDialog() async {
     final goSettings = await showDialog<bool>(
       context: context,
@@ -113,202 +155,180 @@ class _MapScreenState extends State<MapScreen> {
       },
     );
     if (goSettings == true) {
+      // 앱 설정 화면 열기
       await openAppSettings();
     }
   }
 
   // ------------------------------------------------------------
-  // (B) 운동 시작
+  // (2) 운동 시작
+  // ------------------------------------------------------------
   Future<void> _startWorkout() async {
-    final hasAlways = await _checkAndRequestAlwaysPermission();
-    if (!hasAlways) return;
+    // 이미 시작 중이거나 이미 운동 중이면 return
+    if (_isStartingWorkout || _isWorkoutStarted) return;
 
+    setState(() {
+      _isStartingWorkout = true;
+    });
+
+    // 위치 권한(항상 허용) 체크
+    final hasAlways = await _checkAndRequestAlwaysPermission();
+    if (!hasAlways) {
+      setState(() {
+        _isStartingWorkout = false;
+      });
+      return;
+    }
+
+    // UI 상태 갱신 (운동 시작)
     setState(() {
       _isWorkoutStarted = true;
       _isPaused = false;
       _elapsedTime = "00:00:00";
 
-      _isFirstFixFound = false;
-      _inCountdown = false;
-      _ignoreInitialData = true;
-
-      // movementService 초기화
+      // MovementService 초기화 (스톱워치, 폴리라인, 고도 등)
       _movementService.resetAll();
     });
 
-    // (1) Barometer + Gyroscope start
+    // (A) Barometer, Gyro 시작
     _movementService.startBarometer();
-    _movementService.startGyroscope(); // [NEW] 자이로 추가
+    _movementService.startGyroscope();
 
-    // BackgroundGeolocation 시작
+    // *** Compass 시작 추가 ***
+    _startCompass();
+
+    // (B) BackgroundGeolocation 시작 (콜백 등록)
     await _locationService.startBackgroundGeolocation((bg.Location loc) {
       if (!mounted) return;
-
       setState(() {
         _currentBgLocation = loc;
       });
 
-      if (!_isFirstFixFound) {
-        // 첫 위치
-        _isFirstFixFound = true;
-        _startCountdown();
-        return;
-      }
-
-      if (_ignoreInitialData) {
-        // 카운트다운 중 => 데이터 무시
-        return;
-      }
-
-      // (중요) movementService에 전달
+      // MovementService에 위치 전달
       _movementService.onNewLocation(loc, ignoreData: false);
 
-      // 지도 이동
-      if (_mapIsReady) {
+      // 지도 카메라 이동
+      /*if (_mapIsReady) {
         final currentZoom = _mapController.camera.zoom;
         _mapController.move(
           LatLng(loc.coords.latitude, loc.coords.longitude),
           currentZoom,
         );
-      }
+      }*/
     });
 
-    // 첫 위치 getCurrentPosition
+    // (C) 첫 위치를 즉시 가져오기 (getCurrentPosition)
     final currentLoc = await bg.BackgroundGeolocation.getCurrentPosition(
       desiredAccuracy: bg.Config.DESIRED_ACCURACY_HIGH,
       timeout: 30,
     );
-    if (!mounted) return;
 
+    // 만약 화면이 사라졌다면(return)
+    if (!mounted) {
+      setState(() {
+        _isStartingWorkout = false;
+      });
+      return;
+    }
+
+    // 첫 위치 처리
     setState(() {
       _currentBgLocation = currentLoc;
-    });
 
-    if (!_isFirstFixFound) {
-      _isFirstFixFound = true;
-      _startCountdown();
-    } else if (!_ignoreInitialData) {
+      // MovementService에 onNewLocation
       _movementService.onNewLocation(currentLoc, ignoreData: false);
-    }
 
-    if (_mapIsReady) {
-      _mapController.move(
-        LatLng(currentLoc.coords.latitude, currentLoc.coords.longitude),
-        15.0,
+      // **중요**: 운동 시작 직후, Barometer offset 보정
+      _movementService.setInitialBaroOffsetIfPossible(
+        currentLoc.coords.altitude,
       );
-    }
-  }
 
-  // ------------------------------------------------------------
-  // (C) 카운트다운
-  void _startCountdown() {
-    setState(() {
-      _inCountdown = true;
-      _countdownValue = 10; // 10초
-      _ignoreInitialData = true;
-    });
-
-    Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (_countdownValue <= 1) {
-        timer.cancel();
-
-        setState(() {
-          _inCountdown = false;
-          _ignoreInitialData = false;
-        });
-
-        // 스톱워치 start
-        _movementService.resetStopwatch();
-        _movementService.startStopwatch();
-        _updateElapsedTime();
-
-        // 현재 위치 한번 더
-        final loc = await bg.BackgroundGeolocation.getCurrentPosition(
-          desiredAccuracy: bg.Config.DESIRED_ACCURACY_HIGH,
-          timeout: 30,
+      // 지도 카메라 첫 이동
+      if (_mapIsReady) {
+        _mapController.move(
+          LatLng(currentLoc.coords.latitude-0.001, currentLoc.coords.longitude),
+          17.0,
         );
-        if (!mounted) return;
-
-        setState(() {
-          _currentBgLocation = loc;
-          // movementService에 전달
-          _movementService.onNewLocation(loc);
-        });
-
-        if (_mapIsReady) {
-          final currentZoom = _mapController.camera.zoom;
-          _mapController.move(
-            LatLng(loc.coords.latitude, loc.coords.longitude),
-            currentZoom,
-          );
-        }
-      } else {
-        setState(() {
-          _countdownValue--;
-        });
       }
     });
+
+    // (D) 스톱워치 시작 + 1초 간격 UI 업데이트
+    _movementService.startStopwatch();
+    _updateElapsedTime();
+
+    // 시작 절차 완료
+    setState(() {
+      _isStartingWorkout = false;
+    });
   }
 
   // ------------------------------------------------------------
-  // (D) 일시중지
+  // (3) 일시중지
+  // ------------------------------------------------------------
   void _pauseWorkout() {
     setState(() {
       _isPaused = true;
     });
-    // movementService 스톱워치 stop
+    // MovementService의 스톱워치 중지
     _movementService.pauseStopwatch();
   }
 
   // ------------------------------------------------------------
-  // (E) 운동 종료
+  // (4) 운동 종료
+  // ------------------------------------------------------------
   Future<void> _stopWorkout() async {
     setState(() {
       _isWorkoutStarted = false;
       _isPaused = false;
 
-      // movementService 리셋
-      _movementService.resetAll();
-
+      _movementService.resetAll();  // 센서 정지, 폴리라인/스톱워치 초기화
       _elapsedTime = "00:00:00";
-      _isFirstFixFound = false;
-      _inCountdown = false;
-      _ignoreInitialData = true;
-      _countdownValue = 10;
       _currentBgLocation = null;
     });
 
+    // BG 위치추적 중지
     await _locationService.stopBackgroundGeolocation();
+
+    // (B) Barometer, Gyroscope, Compass 정지
+    _movementService.stopBarometer();
+    _movementService.stopGyroscope();
+    _stopCompass();  // <-- Compass 정지 호출
+
+    // onStopWorkout 콜백이 있다면 호출 (WebView 복귀 등)
     widget.onStopWorkout?.call();
   }
 
   // ------------------------------------------------------------
-  // (F) 1초마다 스톱워치 갱신
+  // (5) 스톱워치 UI 갱신 (1초 간격)
+  // ------------------------------------------------------------
   void _updateElapsedTime() {
     Future.delayed(const Duration(seconds: 1), () {
       if (!mounted) return;
-
-      // 운동중이고, 일시중지 상태가 아니면 계속 갱신
+      // 운동 중 && 일시중지가 아닌 상태에서만 계속 갱신
       if (_isWorkoutStarted && !_isPaused) {
         setState(() {
           _elapsedTime = _movementService.elapsedTimeString;
         });
+        // 재귀적으로 다시 호출
         _updateElapsedTime();
       }
     });
   }
 
   // ------------------------------------------------------------
-  // (G) UI 빌드
+  // (6) UI 빌드
+  // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("운동 기록 + 첫 위치 후 카운트다운"),
-      ),
+      /*appBar: AppBar(
+        title: const Text("운동 기록 (flutter_compass 적용)"),
+      ),*/
       body: Stack(
         children: [
-          // 1) FlutterMap
+          // -------------------------------------------------
+          // (A) FlutterMap
+          // -------------------------------------------------
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
@@ -320,12 +340,12 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
             children: [
-              // 기본 OSM
+              // 1) 기본 타일 레이어 (OSM)
               TileLayer(
-                urlTemplate: 'https://tiles.osm.kr/hot/{z}/{x}/{y}.png',
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 maxZoom: 19,
               ),
-              // 한국 지도의 클리핑 레이어
+              // 2) 한국 지도 클리핑 레이어
               KoreaClipLayer(
                 polygon: mainKoreaPolygon,
                 child: TileLayer(
@@ -333,8 +353,7 @@ class _MapScreenState extends State<MapScreen> {
                   maxZoom: 19,
                 ),
               ),
-
-              // 정확도 원
+              // 3) 위치 정확도 원 (Circle)
               if (_currentBgLocation != null)
                 CircleLayer(
                   circles: [
@@ -345,14 +364,13 @@ class _MapScreenState extends State<MapScreen> {
                       ),
                       radius: _currentBgLocation?.coords.accuracy ?? 5.0,
                       useRadiusInMeter: true,
-                      color: Colors.blue.withAlpha(50),
-                      borderColor: Colors.blue,
+                      color: Colors.red.withAlpha(50),
+                      borderColor: Colors.red,
                       borderStrokeWidth: 2.0,
                     ),
                   ],
                 ),
-
-              // [NEW] 현재 위치 + 방향 삼각형
+              // 4) 현재 위치 + heading 방향
               if (_currentBgLocation?.coords != null)
                 MarkerLayer(
                   markers: [
@@ -364,33 +382,37 @@ class _MapScreenState extends State<MapScreen> {
                       width: 40.0,
                       height: 40.0,
                       child: Transform.rotate(
-                        angle: _movementService.headingRad - math.pi / 2, // inline 사용
+                        // 1) _compassHeading가 null일 수도 있으니 ?? 0
+                        // 2) to 라디안: (deg * pi/180)
+                        // 3) Icon 자체가 "위쪽=0도"라면, 북쪽(0도) 시에 위를 향하도록 -90도 보정
+                        angle: ((_compassHeading ?? 0) * math.pi / 180) - math.pi / 2,
                         alignment: Alignment.center,
-                        child: Icon(
+                        child: const Icon(
                           Icons.navigation,
-                          color: Colors.blue,
+                          color: Colors.red,
                           size: 30.0,
                         ),
                       ),
                     ),
                   ],
                 ),
-
-              // 폴리라인(이동경로)
+              // 5) 이동 경로(폴리라인)
               if (_movementService.polylinePoints.isNotEmpty)
                 PolylineLayer(
                   polylines: [
                     Polyline(
                       points: _movementService.polylinePoints,
-                      strokeWidth: 4.0,
-                      color: Colors.blue,
+                      strokeWidth: 5.0,
+                      color: Colors.red,
                     ),
                   ],
                 ),
             ],
           ),
 
-          // 2) 운동 시작 전 => "운동 시작" 버튼
+          // -------------------------------------------------
+          // (B) 운동 전 => "운동 시작" 버튼
+          // -------------------------------------------------
           if (!_isWorkoutStarted)
             Positioned(
               bottom: 20,
@@ -398,7 +420,7 @@ class _MapScreenState extends State<MapScreen> {
               right: 0,
               child: Center(
                 child: ElevatedButton(
-                  onPressed: _startWorkout,
+                  onPressed: _isStartingWorkout ? null : _startWorkout,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.greenAccent,
                     shape: RoundedRectangleBorder(
@@ -408,13 +430,19 @@ class _MapScreenState extends State<MapScreen> {
                   ),
                   child: const Text(
                     "운동 시작",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white
+                    ),
                   ),
                 ),
               ),
             ),
 
-          // 3) 운동 중 => 하단 패널
+          // -------------------------------------------------
+          // (C) 운동 중 => 하단 패널 (일시중지/재시작/종료, 정보 표시)
+          // -------------------------------------------------
           if (_isWorkoutStarted)
             Positioned(
               bottom: 0,
@@ -424,7 +452,10 @@ class _MapScreenState extends State<MapScreen> {
                 padding: const EdgeInsets.all(16),
                 decoration: const BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)),
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(20),
+                    topRight: Radius.circular(20),
+                  ),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.grey,
@@ -452,12 +483,22 @@ class _MapScreenState extends State<MapScreen> {
                       crossAxisSpacing: 12,
                       childAspectRatio: 3.5,
                       children: [
-                        _buildInfoTile("📍 거리", "${_movementService.distanceKm.toStringAsFixed(1)} km"),
-                        _buildInfoTile("⚡ 속도", "${_movementService.averageSpeedKmh.toStringAsFixed(2)} km/h"),
+                        // 거리
                         _buildInfoTile(
-                          "🏠 현재고도",
-                          "${(_currentBgLocation?.coords.altitude ?? 0).toInt()} m",
+                            "📍 거리",
+                            "${_movementService.distanceKm.toStringAsFixed(1)} km"
                         ),
+                        // 속도
+                        _buildInfoTile(
+                            "⚡ 속도",
+                            "${_movementService.averageSpeedKmh.toStringAsFixed(2)} km/h"
+                        ),
+                        // (변경) GPS 고도 대신 Fused Altitude(바로+GPS 융합)
+                        _buildInfoTile(
+                          "🏠 현재고도 (Fused)",
+                          "${(_movementService.fusedAltitude ?? 0.0).toStringAsFixed(1)} m",
+                        ),
+                        // 누적상승고도
                         _buildInfoTile(
                           "📈 누적상승고도",
                           "${_movementService.cumulativeElevation.toStringAsFixed(1)} m",
@@ -465,19 +506,21 @@ class _MapScreenState extends State<MapScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
+
+                    // "중지"/"재시작+종료" 버튼들
                     _buildPauseResumeButtons(),
                   ],
                 ),
               ),
             ),
-
-          // 4) 카운트다운 오버레이
-          if (_inCountdown) _buildCountdownOverlay(),
         ],
       ),
     );
   }
 
+  // ------------------------------------------------------------
+  // (7) UI 헬퍼 위젯들
+  // ------------------------------------------------------------
   Widget _buildInfoTile(String title, String value) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -490,7 +533,7 @@ class _MapScreenState extends State<MapScreen> {
 
   Widget _buildPauseResumeButtons() {
     if (!_isPaused) {
-      // "중지" 버튼
+      // "일시중지 ⏸️"
       return SizedBox(
         width: MediaQuery.of(context).size.width * 0.4,
         height: 40,
@@ -500,11 +543,14 @@ class _MapScreenState extends State<MapScreen> {
             backgroundColor: Colors.orangeAccent,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
-          child: const Text("중지 ⏸️", style: TextStyle(color: Colors.white, fontSize: 15)),
+          child: const Text(
+            "중지 ⏸️",
+            style: TextStyle(color: Colors.white, fontSize: 15),
+          ),
         ),
       );
     } else {
-      // "재시작" + "종료"
+      // "재시작 ▶" + "종료 ■"
       return Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
@@ -537,28 +583,11 @@ class _MapScreenState extends State<MapScreen> {
       );
     }
   }
-
-  Widget _buildCountdownOverlay() {
-    return Positioned.fill(
-      child: Container(
-        color: Colors.black87,
-        child: Center(
-          child: Text(
-            _countdownValue.toString(),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 72,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
-// -------------------------------------------------------
-//  ClipPath classes : 한국 영역
+// ------------------------------------------------------------
+// Clip classes (한반도 지도 영역을 clipPath로 잘라내는 예시)
+// ------------------------------------------------------------
 class KoreaClipLayer extends StatelessWidget {
   final Widget child;
   final List<LatLng> polygon;
@@ -573,6 +602,7 @@ class KoreaClipLayer extends StatelessWidget {
     final mapCamera = MapCamera.of(context);
     final ui.Path path = ui.Path();
 
+    // polygon 리스트가 유효하면, 해당 꼭지점들을 path로 만든다
     if (polygon.isNotEmpty && mapCamera != null) {
       final firstPt = mapCamera.latLngToScreenPoint(polygon[0]);
       path.moveTo(firstPt.x, firstPt.y);
@@ -583,6 +613,7 @@ class KoreaClipLayer extends StatelessWidget {
       path.close();
     }
 
+    // ClipPath로 child를 잘라서 표시
     return ClipPath(
       clipper: _KoreaClipper(path),
       child: child,
@@ -596,7 +627,7 @@ class _KoreaClipper extends CustomClipper<ui.Path> {
 
   @override
   ui.Path getClip(Size size) => path;
+
   @override
   bool shouldReclip(_KoreaClipper oldClipper) => true;
 }
-
