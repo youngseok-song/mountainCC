@@ -29,14 +29,25 @@ class MovementService {
   List<LatLng> get polylinePoints => _polylinePoints;
 
   /// 스톱워치
-  final Stopwatch _stopwatch = Stopwatch();
+  final Stopwatch _exerciseStopwatch = Stopwatch(); // 운동중
+  final Stopwatch _restStopwatch = Stopwatch(); // 휴식중
+
+  String get exerciseElapsedTimeString {
+    final d = _exerciseStopwatch.elapsed;
+    return _formatDuration(d);
+  }
+
+  String get restElapsedTimeString {
+    final d = _restStopwatch.elapsed;
+    return _formatDuration(d);
+  }
+
 
   /// 스톱워치 경과시간을 "HH:MM:SS" 형태로 리턴
-  String get elapsedTimeString {
-    final d = _stopwatch.elapsed;
-    final hh = d.inHours.toString().padLeft(2, '0');
-    final mm = (d.inMinutes % 60).toString().padLeft(2, '0');
-    final ss = (d.inSeconds % 60).toString().padLeft(2, '0');
+  String _formatDuration(Duration dur) {
+    final hh = dur.inHours.toString().padLeft(2, '0');
+    final mm = (dur.inMinutes % 60).toString().padLeft(2, '0');
+    final ss = (dur.inSeconds % 60).toString().padLeft(2, '0');
     return "$hh:$mm:$ss";
   }
 
@@ -187,9 +198,9 @@ class MovementService {
   /// 평균 속도(km/h)
   ///  - 거리(km) / 시간(시간단위)
   double get averageSpeedKmh {
-    if (_stopwatch.elapsed.inSeconds == 0) return 0.0;
+    if (_exerciseStopwatch.elapsed.inSeconds == 0) return 0.0;
     final km = distanceKm;
-    final hours = _stopwatch.elapsed.inSeconds / 3600.0;
+    final hours = _exerciseStopwatch.elapsed.inSeconds / 3600.0;
     return km / hours;
   }
 
@@ -197,14 +208,30 @@ class MovementService {
   // 4) 스톱워치 제어
   // =========================================================================
 
-  /// 시작 (resume)
-  void startStopwatch() => _stopwatch.start();
+  /// 운동(메인) 스톱워치 시작
+  void startStopwatch() {
+    _exerciseStopwatch.start();
+  }
 
-  /// 일시중지 (pause)
-  void pauseStopwatch() => _stopwatch.stop();
+  /// 운동(메인) 스톱워치 일시중지 → 휴식 스톱워치 시작
+  void pauseStopwatch() {
+    _exerciseStopwatch.stop();
+    _restStopwatch.start();
+  }
 
-  /// 시간 reset
-  void resetStopwatch() => _stopwatch.reset();
+  /// 재시작: 휴식 스톱워치 중단 → 운동 스톱워치 다시 시작
+  void resumeStopwatch() {
+    _restStopwatch.stop();
+    _exerciseStopwatch.start();
+  }
+
+  /// 완전 리셋(운동 종료 시)
+  void resetStopwatch() {
+    _exerciseStopwatch.stop();
+    _exerciseStopwatch.reset();
+    _restStopwatch.stop();
+    _restStopwatch.reset();
+  }
 
   // =========================================================================
   // 5) 위치 콜백 (GPS 이벤트) → (A) 폴리라인, (B) 고도 계산

@@ -1,7 +1,9 @@
 // screens/webview_and_map_screen.dart
 
+import 'dart:async'; // <-- (중요) StreamSubscription 등 사용을 위해
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart'; // flutter_inappwebview 패키지 임포트
+import 'package:connectivity_plus/connectivity_plus.dart'; // 연결 상태 감지
 import 'map_screen.dart'; // 지도/운동 화면
 
 class WebViewAndMapScreen extends StatefulWidget {
@@ -12,11 +14,54 @@ class WebViewAndMapScreen extends StatefulWidget {
 }
 
 class _WebViewAndMapScreenState extends State<WebViewAndMapScreen> {
-  // true 면 웹뷰 화면을 표시하고, false 면 지도 화면(MapScreen) 표시
+  // [A] true 면 웹뷰 화면 표시, false 면 지도 화면 표시
   bool _showWebView = true;
 
-  // InAppWebViewController: 웹뷰를 제어할 수 있는 컨트롤러 (JS 실행 등)
+  // [B] 웹뷰 컨트롤러
   InAppWebViewController? _webViewController;
+
+  // [C] 지도 MapScreen에 접근하기 위한 GlobalKey
+  //     - 지도 타일 재로드를 위해 MapScreenState의 메서드를 호출할 수 있음
+  final GlobalKey<MapScreenState> _mapScreenKey = GlobalKey<MapScreenState>();
+
+  // [D] 연결 상태 감지용 Subscription
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+
+  @override
+  void initState() {
+    super.initState();
+    // (1) 네트워크 상태 변화를 구독
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
+      // results 예: [ConnectivityResult.wifi, ConnectivityResult.mobile]
+      // 여러 개가 동시에 연결될 수도 있다는 개념
+
+      final hasConnection = results.any((r) => r != ConnectivityResult.none);
+      if (hasConnection) {
+        _onInternetReconnected();
+      } else {
+        // 오프라인 상태 처리
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    // (2) 구독 해제
+    _connectivitySub?.cancel();
+    super.dispose();
+  }
+
+  // (3) 재연결 시 로직
+  void _onInternetReconnected() {
+    if (_showWebView) {
+      // 현재 웹뷰 화면이면 웹뷰 reload
+      _webViewController?.reload();
+    } else {
+      // 지도 화면이면 지도 타일 캐시 무효화 → 재요청
+      _mapScreenKey.currentState?.reloadMapTiles();
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -66,6 +111,7 @@ class _WebViewAndMapScreenState extends State<WebViewAndMapScreen> {
           // - _showWebView = false 일 때만 표시
           if (!_showWebView)
             MapScreen(
+              key: _mapScreenKey, // <-- 반드시 추가(웹/앱 리로드)
               // MapScreen에서 "종료" 버튼 등을 누르면 다시 웹뷰로 돌아가기
               onStopWorkout: () {
                 setState(() {

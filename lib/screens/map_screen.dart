@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 
 import 'package:flutter_background_geolocation/flutter_background_geolocation.dart' as bg;
+import 'package:flutter_svg/flutter_svg.dart';
 
 
 import '../models/location_data.dart';
@@ -46,10 +47,10 @@ class MapScreen extends StatefulWidget {
   const MapScreen({super.key, this.onStopWorkout});
 
   @override
-  State<MapScreen> createState() => _MapScreenState();
+  MapScreenState createState() => MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class MapScreenState extends State<MapScreen> {
   // (A) 지도 컨트롤러
   final MapController _mapController = MapController();
   bool _mapIsReady = false; // onMapReady 콜백에서 true로 바뀜
@@ -72,6 +73,8 @@ class _MapScreenState extends State<MapScreen> {
   // -----------------------------------------
   StreamSubscription<CompassEvent>? _compassSub;
   double? _compassHeading; // 도(0=북, 90=동, 180=남, 270=서)
+  bool _ignoreDataFirst3s = true; // 운동 시작 후 3초간은 계산 무시
+
 
   @override
   void initState() {
@@ -97,11 +100,13 @@ class _MapScreenState extends State<MapScreen> {
   void _startCompass() {
     // flutter_compass의 이벤트 스트림 구독
     _compassSub = FlutterCompass.events!.listen((CompassEvent event) {
-      // event.heading: 0 ~ 360 (double)
       if (event.heading != null) {
-        setState(() {
-          _compassHeading = event.heading; // 단위: 도
-        });
+        // 만약 3초 전에는 heading을 무시하고 싶으면:
+        if (!_ignoreDataFirst3s) {
+          setState(() {
+            _compassHeading = event.heading;
+          });
+        }
       }
     });
   }
@@ -182,6 +187,7 @@ class _MapScreenState extends State<MapScreen> {
 
     // UI 상태 갱신 (운동 시작)
     setState(() {
+      _movementService.resetAll();
       _isWorkoutStarted = true;
       _isPaused = false;
       _elapsedTime = "00:00:00";
@@ -205,16 +211,8 @@ class _MapScreenState extends State<MapScreen> {
       });
 
       // MovementService에 위치 전달
-      _movementService.onNewLocation(loc, ignoreData: false);
+      _movementService.onNewLocation(loc, ignoreData: _ignoreDataFirst3s || _isPaused);
 
-      // 지도 카메라 이동
-      /*if (_mapIsReady) {
-        final currentZoom = _mapController.camera.zoom;
-        _mapController.move(
-          LatLng(loc.coords.latitude, loc.coords.longitude),
-          currentZoom,
-        );
-      }*/
     });
 
     // (C) 첫 위치를 즉시 가져오기 (getCurrentPosition)
@@ -236,7 +234,7 @@ class _MapScreenState extends State<MapScreen> {
       _currentBgLocation = currentLoc;
 
       // MovementService에 onNewLocation
-      _movementService.onNewLocation(currentLoc, ignoreData: false);
+      _movementService.onNewLocation(currentLoc, ignoreData: true);
 
       // **중요**: 운동 시작 직후, Barometer offset 보정
       _movementService.setInitialBaroOffsetIfPossible(
@@ -247,14 +245,21 @@ class _MapScreenState extends State<MapScreen> {
       if (_mapIsReady) {
         _mapController.move(
           LatLng(currentLoc.coords.latitude-0.001, currentLoc.coords.longitude),
-          17.0,
+          18.0,
         );
       }
     });
 
-    // (D) 스톱워치 시작 + 1초 간격 UI 업데이트
-    _movementService.startStopwatch();
-    _updateElapsedTime();
+    // 3초 뒤 -> ignoreDataFirst3s=false
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      setState(() {
+        _ignoreDataFirst3s = false;
+        // **운동 스톱워치** 시작
+        _movementService.startStopwatch();
+        _updateElapsedTime(); // 1초 간격 갱신
+      });
+    });
 
     // 시작 절차 완료
     setState(() {
@@ -266,15 +271,24 @@ class _MapScreenState extends State<MapScreen> {
   // (3) 일시중지
   // ------------------------------------------------------------
   void _pauseWorkout() {
-    setState(() {
-      _isPaused = true;
-    });
-    // MovementService의 스톱워치 중지
+    setState(() => _isPaused = true);
+    // movementService 운동 스톱워치 정지 + 휴식 스톱워치 시작
     _movementService.pauseStopwatch();
   }
 
   // ------------------------------------------------------------
-  // (4) 운동 종료
+  // (4) 재시작
+  // ------------------------------------------------------------
+  void _resumeWorkout() {
+    setState(() => _isPaused = false);
+    // 휴식 스톱워치 정지 + 운동 스톱워치 재시작
+    _movementService.resumeStopwatch();
+    // 운동 시간 스톱워치 갱신
+    _updateElapsedTime();
+  }
+
+  // ------------------------------------------------------------
+  // (5) 운동 종료
   // ------------------------------------------------------------
   Future<void> _stopWorkout() async {
     setState(() {
@@ -296,6 +310,7 @@ class _MapScreenState extends State<MapScreen> {
 
     // onStopWorkout 콜백이 있다면 호출 (WebView 복귀 등)
     widget.onStopWorkout?.call();
+
   }
 
   // ------------------------------------------------------------
@@ -304,15 +319,42 @@ class _MapScreenState extends State<MapScreen> {
   void _updateElapsedTime() {
     Future.delayed(const Duration(seconds: 1), () {
       if (!mounted) return;
-      // 운동 중 && 일시중지가 아닌 상태에서만 계속 갱신
-      if (_isWorkoutStarted && !_isPaused) {
+      // 운동 중 & !_isPaused => 운동시간
+      // 운동 중 &  _isPaused => 휴식시간
+      if (_isWorkoutStarted) {
         setState(() {
-          _elapsedTime = _movementService.elapsedTimeString;
+          if (_isPaused) {
+            // 휴식시간
+            _elapsedTime = _movementService.restElapsedTimeString;
+          } else {
+            // 운동시간
+            _elapsedTime = _movementService.exerciseElapsedTimeString;
+          }
         });
-        // 재귀적으로 다시 호출
+        // 재귀적 호출
         _updateElapsedTime();
       }
     });
+  }
+
+// flutter_map: tile reloading
+  void reloadMapTiles() {
+    if (_mapIsReady) {
+      // 바뀐 버전에서는 center, zoom이 camera 객체 안에 있을 수 있음
+      final currentCenter = _mapController.camera.center;
+      final currentZoom = _mapController.camera.zoom;
+
+      // 잠깐 move
+      _mapController.move(
+        LatLng(currentCenter.latitude, currentCenter.longitude + 0.00001),
+        currentZoom,
+      );
+
+      // 0.1초 후 원상 복귀
+      Future.delayed(const Duration(milliseconds: 100), () {
+        _mapController.move(currentCenter, currentZoom);
+      });
+    }
   }
 
   // ------------------------------------------------------------
@@ -320,6 +362,10 @@ class _MapScreenState extends State<MapScreen> {
   // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
+    // 1) 현재 위치의 accuracy를 가져오고, null이면 5.0
+    final rawAccuracy = _currentBgLocation?.coords.accuracy ?? 5.0;
+    // 2) clamp(10, 100) -> 최소 10, 최대 100
+    final clampedAccuracy = rawAccuracy.clamp(15.0, 100.0);
     return Scaffold(
       /*appBar: AppBar(
         title: const Text("운동 기록 (flutter_compass 적용)"),
@@ -362,7 +408,7 @@ class _MapScreenState extends State<MapScreen> {
                         _currentBgLocation!.coords.latitude,
                         _currentBgLocation!.coords.longitude,
                       ),
-                      radius: _currentBgLocation?.coords.accuracy ?? 5.0,
+                      radius: clampedAccuracy,
                       useRadiusInMeter: true,
                       color: Colors.red.withAlpha(50),
                       borderColor: Colors.red,
@@ -381,17 +427,9 @@ class _MapScreenState extends State<MapScreen> {
                       ),
                       width: 40.0,
                       height: 40.0,
-                      child: Transform.rotate(
-                        // 1) _compassHeading가 null일 수도 있으니 ?? 0
-                        // 2) to 라디안: (deg * pi/180)
-                        // 3) Icon 자체가 "위쪽=0도"라면, 북쪽(0도) 시에 위를 향하도록 -90도 보정
-                        angle: ((_compassHeading ?? 0) * math.pi / 180) - math.pi / 2,
-                        alignment: Alignment.center,
-                        child: const Icon(
-                          Icons.navigation,
-                          color: Colors.red,
-                          size: 30.0,
-                        ),
+                      child: _buildGoogleStyleMarker(
+                        // headingRad: _compassHeading(도) → 라디안 변환
+                        (_compassHeading ?? 0) * math.pi / 180,
                       ),
                     ),
                   ],
@@ -415,25 +453,31 @@ class _MapScreenState extends State<MapScreen> {
           // -------------------------------------------------
           if (!_isWorkoutStarted)
             Positioned(
-              bottom: 20,
+              bottom: 30,
               left: 0,
               right: 0,
               child: Center(
-                child: ElevatedButton(
-                  onPressed: _isStartingWorkout ? null : _startWorkout,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.greenAccent,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
+                // (1) 버튼 넓이를 90%로 만들고 싶다면, SizedBox 등을 통해 고정
+                child: SizedBox(
+                  width: MediaQuery.of(context).size.width * 0.9, // 화면 가로길이의 90%
+                  child: ElevatedButton(
+                    onPressed: _isStartingWorkout ? null : _startWorkout,
+                    style: ElevatedButton.styleFrom(
+                      // (2) 버튼 배경 색상(white)
+                      backgroundColor: Colors.white.withAlpha(230),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      elevation: 5.0,
                     ),
-                    elevation: 5.0,
-                  ),
-                  child: const Text(
-                    "운동 시작",
-                    style: TextStyle(
+                    child: const Text(
+                      "운동 시작",
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: Colors.white
+                        // (3) 글씨 검정색
+                        color: Colors.black,
+                      ),
                     ),
                   ),
                 ),
@@ -468,10 +512,19 @@ class _MapScreenState extends State<MapScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text("운동시간", style: TextStyle(fontSize: 16, color: Colors.grey)),
+                    // (1) 타이틀: "운동시간" / "휴식시간"
+                    Text(
+                      _isPaused ? "휴식시간" : "운동시간",
+                      style: const TextStyle(fontSize: 16, color: Colors.grey),
+                    ),
+                    // (2) 시간 표시: black / grey
                     Text(
                       _elapsedTime,
-                      style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.black),
+                      style: TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        color: _isPaused ? Colors.grey : Colors.black,
+                      ),
                     ),
                     const SizedBox(height: 16),
 
@@ -485,23 +538,27 @@ class _MapScreenState extends State<MapScreen> {
                       children: [
                         // 거리
                         _buildInfoTile(
-                            "📍 거리",
-                            "${_movementService.distanceKm.toStringAsFixed(1)} km"
+                            "assets/icons/distance.svg",  // 아이콘 경로
+                            "거리",
+                            "${_movementService.distanceKm.toStringAsFixed(2)} km"
                         ),
                         // 속도
                         _buildInfoTile(
-                            "⚡ 속도",
+                            "assets/icons/speed.svg",
+                            "속도",
                             "${_movementService.averageSpeedKmh.toStringAsFixed(2)} km/h"
                         ),
                         // (변경) GPS 고도 대신 Fused Altitude(바로+GPS 융합)
                         _buildInfoTile(
-                          "🏠 현재고도 (Fused)",
-                          "${(_movementService.fusedAltitude ?? 0.0).toStringAsFixed(1)} m",
+                            "assets/icons/altitude.svg",
+                            "현재고도",
+                            "${(_movementService.fusedAltitude ?? 0.0).toStringAsFixed(1)} m"
                         ),
                         // 누적상승고도
                         _buildInfoTile(
-                          "📈 누적상승고도",
-                          "${_movementService.cumulativeElevation.toStringAsFixed(1)} m",
+                            "assets/icons/elevation.svg",
+                            "누적상승고도",
+                            "${_movementService.cumulativeElevation.toStringAsFixed(1)} m"
                         ),
                       ],
                     ),
@@ -518,34 +575,98 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+//마커위젯
+  Widget _buildGoogleStyleMarker(double headingRad) {
+    return Transform.rotate(
+      // heading=0° 일 때 화살표가 "위쪽"을 향하도록 -pi/2 보정
+      angle: headingRad,
+      alignment: Alignment.center,
+      child: SizedBox(
+        width: 50,
+        height: 50,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // (1) 파란 원 + 흰색 테두리
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.red,
+                border: Border.all(color: Colors.white, width: 3),
+              ),
+            ),
+            // (2) 상단 삼각형 화살표 (아이콘) - 크기나 위치는 상황에 맞게 조정
+            // - Transform.rotate 로 전체가 도는 것이므로, 여기서는 "위쪽"을 기본으로 두면 됨.
+            Positioned(
+              top: -10, // 원 내부 위쪽 근처
+              child: Icon(
+                Icons.arrow_drop_up,
+                color: Colors.red,
+                size: 30,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ------------------------------------------------------------
   // (7) UI 헬퍼 위젯들
   // ------------------------------------------------------------
-  Widget _buildInfoTile(String title, String value) {
+  Widget _buildInfoTile(String iconPath, String title, String value) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text(title, style: const TextStyle(fontSize: 14, color: Colors.grey)),
-        Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // 1) SVG 아이콘
+            SvgPicture.asset(
+              iconPath,
+              width: 20,  // 기존 이모지 크기와 유사하게
+              height: 20,
+            ),
+            const SizedBox(width: 6),
+            // 2) 텍스트(제목)
+            Text(
+              title,
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        // 3) 값
+        Text(
+          value,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
       ],
     );
   }
 
+
   Widget _buildPauseResumeButtons() {
     if (!_isPaused) {
-      // "일시중지 ⏸️"
+      // "중지" 버튼
       return SizedBox(
         width: MediaQuery.of(context).size.width * 0.4,
         height: 40,
         child: ElevatedButton(
           onPressed: _pauseWorkout,
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.orangeAccent,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            backgroundColor: Colors.white, // ← 흰색 배경
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            elevation: 5.0, // 필요 시 그림자 조정
           ),
           child: const Text(
             "중지 ⏸️",
-            style: TextStyle(color: Colors.white, fontSize: 15),
+            style: TextStyle(
+              color: Colors.black, // ← 검정색 글씨
+              fontSize: 15,
+            ),
           ),
         ),
       );
@@ -554,30 +675,50 @@ class _MapScreenState extends State<MapScreen> {
       return Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
+          // 재시작 버튼
           ElevatedButton(
             onPressed: () {
-              // 재시작
               setState(() {
                 _isPaused = false;
               });
-              _movementService.startStopwatch();
+              _movementService.resumeStopwatch();
               _updateElapsedTime();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blueAccent,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              backgroundColor: Colors.white, // 흰색 배경
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
               minimumSize: const Size(120, 48),
+              elevation: 5.0, // 필요 시 그림자
             ),
-            child: const Text("재시작 ▶", style: TextStyle(color: Colors.white, fontSize: 15)),
+            child: const Text(
+              "재시작 ▶",
+              style: TextStyle(
+                color: Colors.black, // 검정 글씨
+                fontSize: 15,
+              ),
+            ),
           ),
+
+          // 종료 버튼
           ElevatedButton(
             onPressed: _stopWorkout,
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              backgroundColor: Colors.white, // 흰색 배경
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
               minimumSize: const Size(120, 48),
+              elevation: 5.0,
             ),
-            child: const Text("종료 ■", style: TextStyle(color: Colors.white, fontSize: 15)),
+            child: const Text(
+              "종료 ■",
+              style: TextStyle(
+                color: Colors.black, // 검정 글씨
+                fontSize: 15,
+              ),
+            ),
           ),
         ],
       );

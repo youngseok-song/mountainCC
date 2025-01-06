@@ -40,6 +40,8 @@ dependencies:
   sensors_plus: ^6.1.1
   permission_handler: ^11.3.1
   flutter_compass: ^0.8.1
+  connectivity_plus: ^6.1.1
+  flutter_svg: ^2.0.16
 
 
 
@@ -59,6 +61,11 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  assets:
+    - assets/icons/elevation.svg
+    - assets/icons/altitude.svg
+    - assets/icons/speed.svg
+    - assets/icons/distance.svg
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
