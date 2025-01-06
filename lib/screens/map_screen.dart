@@ -244,7 +244,7 @@ class MapScreenState extends State<MapScreen> {
       // 지도 카메라 첫 이동
       if (_mapIsReady) {
         _mapController.move(
-          LatLng(currentLoc.coords.latitude-0.001, currentLoc.coords.longitude),
+          LatLng(currentLoc.coords.latitude-0.0005, currentLoc.coords.longitude),
           18.0,
         );
       }
@@ -365,7 +365,7 @@ class MapScreenState extends State<MapScreen> {
     // 1) 현재 위치의 accuracy를 가져오고, null이면 5.0
     final rawAccuracy = _currentBgLocation?.coords.accuracy ?? 5.0;
     // 2) clamp(10, 100) -> 최소 10, 최대 100
-    final clampedAccuracy = rawAccuracy.clamp(15.0, 100.0);
+    final clampedAccuracy = rawAccuracy.clamp(30.0, 100.0);
     return Scaffold(
       /*appBar: AppBar(
         title: const Text("운동 기록 (flutter_compass 적용)"),
@@ -453,18 +453,19 @@ class MapScreenState extends State<MapScreen> {
           // -------------------------------------------------
           if (!_isWorkoutStarted)
             Positioned(
-              bottom: 30,
+              bottom: 60,
               left: 0,
               right: 0,
               child: Center(
                 // (1) 버튼 넓이를 90%로 만들고 싶다면, SizedBox 등을 통해 고정
                 child: SizedBox(
                   width: MediaQuery.of(context).size.width * 0.9, // 화면 가로길이의 90%
+                  height: 60,
                   child: ElevatedButton(
                     onPressed: _isStartingWorkout ? null : _startWorkout,
                     style: ElevatedButton.styleFrom(
                       // (2) 버튼 배경 색상(white)
-                      backgroundColor: Colors.white.withAlpha(230),
+                      backgroundColor: Colors.white.withAlpha(210),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                       ),
@@ -526,14 +527,14 @@ class MapScreenState extends State<MapScreen> {
                         color: _isPaused ? Colors.grey : Colors.black,
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 5),
 
                     // 거리, 속도, 고도
                     GridView.count(
                       shrinkWrap: true,
                       crossAxisCount: 2,
-                      mainAxisSpacing: 18.5,
-                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 15,
+                      crossAxisSpacing: 15,
                       childAspectRatio: 3.5,
                       children: [
                         // 거리
@@ -582,15 +583,16 @@ class MapScreenState extends State<MapScreen> {
       angle: headingRad,
       alignment: Alignment.center,
       child: SizedBox(
-        width: 50,
-        height: 50,
+        width: 85,
+        height: 85,
         child: Stack(
           alignment: Alignment.center,
+          clipBehavior: Clip.none, // 오버플로우 허용
           children: [
             // (1) 파란 원 + 흰색 테두리
             Container(
-              width: 32,
-              height: 32,
+              width: 20,
+              height: 20,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.red,
@@ -601,10 +603,14 @@ class MapScreenState extends State<MapScreen> {
             // - Transform.rotate 로 전체가 도는 것이므로, 여기서는 "위쪽"을 기본으로 두면 됨.
             Positioned(
               top: -10, // 원 내부 위쪽 근처
-              child: Icon(
-                Icons.arrow_drop_up,
-                color: Colors.red,
-                size: 30,
+              child: Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.diagonal3Values(1.0, 1.5, 1.0),
+                  child: Icon(
+                  Icons.arrow_drop_up,
+                  color: Colors.red,
+                  size: 25,
+                ),
               ),
             ),
           ],
@@ -626,14 +632,14 @@ class MapScreenState extends State<MapScreen> {
             // 1) SVG 아이콘
             SvgPicture.asset(
               iconPath,
-              width: 20,  // 기존 이모지 크기와 유사하게
-              height: 20,
+              width: 18,  // 기존 이모지 크기와 유사하게
+              height: 18,
             ),
             const SizedBox(width: 6),
             // 2) 텍스트(제목)
             Text(
               title,
-              style: const TextStyle(fontSize: 14, color: Colors.grey),
+              style: const TextStyle(fontSize: 13, color: Colors.grey),
             ),
           ],
         ),
@@ -641,7 +647,7 @@ class MapScreenState extends State<MapScreen> {
         // 3) 값
         Text(
           value,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold),
         ),
       ],
     );
