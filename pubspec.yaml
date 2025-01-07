@@ -42,6 +42,8 @@ dependencies:
   flutter_compass: ^0.8.1
   connectivity_plus: ^6.1.1
   flutter_svg: ^2.0.16
+  gpx: ^2.3.0
+  flutter_riverpod: ^2.6.1
 
 
 
@@ -66,6 +68,10 @@ flutter:
     - assets/icons/altitude.svg
     - assets/icons/speed.svg
     - assets/icons/distance.svg
+    - assets/icons/pause.svg
+    - assets/icons/restart.svg
+    - assets/icons/end.svg
+    - assets/icons/loading.gif
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

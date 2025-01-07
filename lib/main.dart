@@ -1,6 +1,7 @@
 //main.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart'; // <- Riverpod
 import 'package:hive_flutter/hive_flutter.dart';
 import 'models/location_data.dart';
 import 'screens/webview_and_map_screen.dart'; // 새로 만든 화면 import
@@ -17,7 +18,7 @@ void main() async {
   // 3) locationBox 오픈 (타입 명시: LocationData)
   await Hive.openBox<LocationData>('locationBox');
 
-  runApp(const MyApp());
+  runApp(const ProviderScope(child: MyApp()));
 }
 
 class MyApp extends StatelessWidget {

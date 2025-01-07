@@ -83,7 +83,7 @@ class LocationService {
       lastSavedPosition = currentLatLng;
       return;
     }
-
+    // 6m마다 hive에 저장
     final distanceMeter = Distance().distance(lastSavedPosition!, currentLatLng);
     if (distanceMeter >= 6.0) {
       _saveToHive(currentLatLng, location.coords.altitude);
