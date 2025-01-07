@@ -26,6 +26,7 @@ class LocationService {
   /// ------------------------------------------------------------
   /// 백그라운드 위치 추적 시작
   Future<void> startBackgroundGeolocation(Function(bg.Location) onPositionUpdate) async {
+
     // [NEW] 혹시 플러그인 자체가 이미 실행 중인지 확인.
     await syncStateFromPlugin();
 
@@ -46,19 +47,25 @@ class LocationService {
     // (2) ready
     await bg.BackgroundGeolocation.ready(
       bg.Config(
+        // 기존 코드
         disableLocationAuthorizationAlert: true,
         desiredAccuracy: bg.Config.DESIRED_ACCURACY_HIGH,
         distanceFilter: 3.0,
+        stopTimeout: 60,
         logLevel: bg.Config.LOG_LEVEL_VERBOSE,
         debug: true,
-        stopOnStationary: false,
-        disableStopDetection: true,
+
+        // 2) 추가 옵션
+        stopOnTerminate: true,      // 앱이 Terminate되면 추적중지 (원하시는 대로)
+        startOnBoot: false,         // 기기 재부팅 시 자동시작 X (원하시는 대로)
+        disableStopDetection: true, // 정지 감지 비활성화 -> 움직임이 없어도 계속 추적
+        stopOnStationary: false,    // stationary 상태여도 멈추지 말 것
       ),
     );
 
     // (3) 실제 start
     await bg.BackgroundGeolocation.start();
-
+    await bg.BackgroundGeolocation.changePace(true); //이동상태 강제전환
     // 완료
     _isTracking = true;
     _isStarting = false;

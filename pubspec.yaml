@@ -44,6 +44,8 @@ dependencies:
   flutter_svg: ^2.0.16
   gpx: ^2.3.0
   flutter_riverpod: ^2.6.1
+  shared_preferences: ^2.3.5
+  fl_chart: ^0.70.1
 
 
 

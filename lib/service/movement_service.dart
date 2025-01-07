@@ -11,16 +11,13 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart'; // ChangeNotifier
-
 import 'package:flutter_background_geolocation/flutter_background_geolocation.dart' as bg;
 import 'package:latlong2/latlong.dart';
-
 import 'package:sensors_plus/sensors_plus.dart'; // Barometer, Gyro
 import '../models/sensor_fusion.dart'; // SensorFusion 객체 (Dead Reckoning, Baro/GPS 혼합)
 
 // MovementService 클래스
-class MovementService extends ChangeNotifier {
+class MovementService {
   // ---------------------------------------------------
   // (A) 폴리라인, 스톱워치, 누적고도 등 '운동' 관련 필드
   // ---------------------------------------------------
@@ -220,14 +217,12 @@ class MovementService extends ChangeNotifier {
   void pauseStopwatch() {
     _exerciseStopwatch.stop();
     _restStopwatch.start();
-    notifyListeners();
   }
 
   /// 재시작: 휴식 스톱워치 중단 → 운동 스톱워치 다시 시작
   void resumeStopwatch() {
     _restStopwatch.stop();
     _exerciseStopwatch.start();
-    notifyListeners();
   }
 
   /// 완전 리셋(운동 종료 시)
@@ -283,9 +278,6 @@ class MovementService extends ChangeNotifier {
     _lastAltitude = gpsAlt;
     _lastTimestampMs = _parseTimestamp(loc.timestamp)
         ?? DateTime.now().millisecondsSinceEpoch;
-
-    notifyListeners();
-
   }
 
   // =========================================================================
@@ -356,10 +348,10 @@ class MovementService extends ChangeNotifier {
       return;
     }
     final diff = currentAlt - _baseAltitude!;
-    if (diff > 3.0) {
+    if (diff > 5.0) {
       _cumulativeElevation += diff;
       _baseAltitude = currentAlt;
-    } else if (diff < -3.0) {
+    } else if (diff < -5.0) {
       _baseAltitude = currentAlt;
     }
   }
@@ -408,7 +400,6 @@ class MovementService extends ChangeNotifier {
     _lastOffsetUpdateTime = 0;
     _lastAltitude = null;
     _lastTimestampMs = null;
-    notifyListeners();
   }
 
   // =========================================================================

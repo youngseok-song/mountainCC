@@ -15,9 +15,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:hive/hive.dart';
 
-
 import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 
@@ -26,9 +24,9 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 
 import '../models/location_data.dart';
-import '../service/movement_provider.dart'; // movementServiceProvider
+import 'exercise_record.dart';
 import '../service/location_service.dart';    // BG start/stop + Hive 저장
-import '../screens/exercise_record.dart';
+import '../service/movement_service.dart';    // 폴리라인, 스톱워치, 고도 계산 등
 import 'dart:math' as math;
 
 
@@ -44,7 +42,7 @@ final List<LatLng> mainKoreaPolygon = [
 ];
 
 // MapScreen 위젯
-class MapScreen extends ConsumerStatefulWidget {
+class MapScreen extends StatefulWidget {
   // onStopWorkout: 운동 종료 후 WebView 등 다른 화면으로 돌아갈 때 호출
   final VoidCallback? onStopWorkout;
   const MapScreen({super.key, this.onStopWorkout});
@@ -53,15 +51,14 @@ class MapScreen extends ConsumerStatefulWidget {
   MapScreenState createState() => MapScreenState();
 }
 
-class MapScreenState extends ConsumerState<MapScreen> {
+class MapScreenState extends State<MapScreen> {
   // (A) 지도 컨트롤러
   final MapController _mapController = MapController();
   bool _mapIsReady = false; // onMapReady 콜백에서 true로 바뀜
 
   // (B) Service 객체
-  //late LocationService _locationService;  // BG 위치추적, Hive 저장
-  //late MovementService _movementService;  // 운동(Baro/GPS 고도, 폴리라인, 스톱워치 등)
   late LocationService _locationService;  // BG 위치추적, Hive 저장
+  late MovementService _movementService;  // 운동(Baro/GPS 고도, 폴리라인, 스톱워치 등)
 
   // (C) 현재 BG plugin이 넘겨준 위치
   bg.Location? _currentBgLocation;
@@ -90,7 +87,7 @@ class MapScreenState extends ConsumerState<MapScreen> {
     _locationService = LocationService(locationBox);
 
     // MovementService 초기화
-    //_movementService = MovementService();
+    _movementService = MovementService();
 
   }
 
@@ -193,18 +190,18 @@ class MapScreenState extends ConsumerState<MapScreen> {
 
     // UI 상태 갱신 (운동 시작)
     setState(() {
-      ref.read(movementServiceProvider).resetAll();
+      _movementService.resetAll();
       _isWorkoutStarted = true;
       _isPaused = false;
       _elapsedTime = "00:00:00";
 
       // MovementService 초기화 (스톱워치, 폴리라인, 고도 등)
-      ref.read(movementServiceProvider).resetAll();
+      _movementService.resetAll();
     });
 
     // (A) Barometer, Gyro 시작
-    ref.read(movementServiceProvider).startBarometer();
-    ref.read(movementServiceProvider).startGyroscope();
+    _movementService.startBarometer();
+    _movementService.startGyroscope();
 
     // *** Compass 시작 추가 ***
     _startCompass();
@@ -213,7 +210,8 @@ class MapScreenState extends ConsumerState<MapScreen> {
     await _locationService.startBackgroundGeolocation((bg.Location loc) {
       // 1) MovementService에 새 점 추가
       //_movementService.onNewLocation(loc, ignoreData: _ignoreDataFirst3s || _isPaused);
-      ref.read(movementServiceProvider).onNewLocation(
+
+      _movementService.onNewLocation(
         loc,
         ignoreData: _ignoreDataFirst3s || _isPaused,
       );
@@ -246,10 +244,10 @@ class MapScreenState extends ConsumerState<MapScreen> {
       _currentBgLocation = currentLoc;
 
       // MovementService에 onNewLocation
-      ref.read(movementServiceProvider).onNewLocation(currentLoc, ignoreData: true);
+      _movementService.onNewLocation(currentLoc, ignoreData: true);
 
       // **중요**: 운동 시작 직후, Barometer offset 보정
-      ref.read(movementServiceProvider).setInitialBaroOffsetIfPossible(
+      _movementService.setInitialBaroOffsetIfPossible(
         currentLoc.coords.altitude,
       );
 
@@ -268,7 +266,7 @@ class MapScreenState extends ConsumerState<MapScreen> {
       setState(() {
         _ignoreDataFirst3s = false;
         // **운동 스톱워치** 시작
-        ref.read(movementServiceProvider).startStopwatch();
+        _movementService.startStopwatch();
         _updateElapsedTime(); // 1초 간격 갱신
         _isPreparing = false; // ← “준비 중” 해제 → 정식 UI
       });
@@ -286,7 +284,7 @@ class MapScreenState extends ConsumerState<MapScreen> {
   void _pauseWorkout() {
     setState(() => _isPaused = true);
     // movementService 운동 스톱워치 정지 + 휴식 스톱워치 시작
-    ref.read(movementServiceProvider).pauseStopwatch();
+    _movementService.pauseStopwatch();
   }
 
   // ------------------------------------------------------------
@@ -295,7 +293,7 @@ class MapScreenState extends ConsumerState<MapScreen> {
   void _resumeWorkout() {
     setState(() => _isPaused = false);
     // 휴식 스톱워치 정지 + 운동 스톱워치 재시작
-    ref.read(movementServiceProvider).resumeStopwatch();
+    _movementService.resumeStopwatch();
     // 운동 시간 스톱워치 갱신
     _updateElapsedTime();
   }
@@ -304,25 +302,44 @@ class MapScreenState extends ConsumerState<MapScreen> {
   // (5) 운동 종료
   // ------------------------------------------------------------
   Future<void> _stopWorkout() async {
-    setState(() {
-      _isWorkoutStarted = false;
-      _isPaused = false;
-
-      ref.read(movementServiceProvider).resetAll();  // 센서 정지, 폴리라인/스톱워치 초기화
-      _elapsedTime = "00:00:00";
-      _currentBgLocation = null;
-    });
+    // (A) 필요한 final 통계값을 미리 보관
+    final distance = _movementService.distanceKm.toStringAsFixed(2);
+    final totalTime = _movementService.exerciseElapsedTimeString;
+    final restTime  = _movementService.restElapsedTimeString;
+    final avgSpeed  = _movementService.averageSpeedKmh.toStringAsFixed(2);
+    final cumElev   = _movementService.cumulativeElevation.toStringAsFixed(2);
 
     // BG 위치추적 중지
     await _locationService.stopBackgroundGeolocation();
 
     // (B) Barometer, Gyroscope, Compass 정지
-    ref.read(movementServiceProvider).stopBarometer();
-    ref.read(movementServiceProvider).stopGyroscope();
+    _movementService.stopBarometer();
+    _movementService.stopGyroscope();
     _stopCompass();  // <-- Compass 정지 호출
 
     // onStopWorkout 콜백이 있다면 호출 (WebView 복귀 등)
     widget.onStopWorkout?.call();
+
+    // → (B) 먼저 SummaryScreen 이동 후,
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => SummaryScreen(
+        totalDistance: distance,
+        totalTime: totalTime,
+        restTime: restTime,
+        avgSpeed: avgSpeed,
+        cumulativeElevation: cumElev,
+      )),
+    );
+
+    setState(() {
+      _isWorkoutStarted = false;
+      _isPaused = false;
+
+      _movementService.resetAll();  // 센서 정지, 폴리라인/스톱워치 초기화
+      _elapsedTime = "00:00:00";
+      _currentBgLocation = null;
+    });
 
   }
 
@@ -338,10 +355,10 @@ class MapScreenState extends ConsumerState<MapScreen> {
         setState(() {
           if (_isPaused) {
             // 휴식시간
-            _elapsedTime = ref.read(movementServiceProvider).restElapsedTimeString;
+            _elapsedTime = _movementService.restElapsedTimeString;
           } else {
             // 운동시간
-            _elapsedTime = ref.read(movementServiceProvider).exerciseElapsedTimeString;
+            _elapsedTime = _movementService.exerciseElapsedTimeString;
           }
         });
         // 재귀적 호출
@@ -375,7 +392,6 @@ class MapScreenState extends ConsumerState<MapScreen> {
   // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
-    final movement = ref.watch(movementServiceProvider);
     // 1) 현재 위치의 accuracy를 가져오고, null이면 5.0
     final rawAccuracy = _currentBgLocation?.coords.accuracy ?? 5.0;
     // 2) clamp(10, 100) -> 최소 10, 최대 100
@@ -457,11 +473,11 @@ class MapScreenState extends ConsumerState<MapScreen> {
                   ],
                 ),
               // 5) 이동 경로(폴리라인)
-              if (movement.polylinePoints.isNotEmpty)
+              if (_movementService.polylinePoints.isNotEmpty)
                 PolylineLayer(
                   polylines: [
                     Polyline(
-                      points: movement.polylinePoints,
+                      points: _movementService.polylinePoints,
                       strokeWidth: 5.0,
                       color: Colors.red,
                     ),
@@ -596,25 +612,25 @@ class MapScreenState extends ConsumerState<MapScreen> {
                             _buildInfoTile(
                                 "assets/icons/distance.svg",  // 아이콘 경로
                                 "거리",
-                                "${movement.distanceKm.toStringAsFixed(2)} km"
+                                "${_movementService.distanceKm.toStringAsFixed(2)} km"
                             ),
                             // 속도
                             _buildInfoTile(
                                 "assets/icons/speed.svg",
                                 "속도",
-                                "${movement.averageSpeedKmh.toStringAsFixed(2)} km/h"
+                                "${_movementService.averageSpeedKmh.toStringAsFixed(2)} km/h"
                             ),
                             // (변경) GPS 고도 대신 Fused Altitude(바로+GPS 융합)
                             _buildInfoTile(
                                 "assets/icons/altitude.svg",
                                 "현재고도",
-                                "${(movement.fusedAltitude ?? 0.0).toStringAsFixed(1)} m"
+                                "${(_movementService.fusedAltitude ?? 0.0).toStringAsFixed(1)} m"
                             ),
                             // 누적상승고도
                             _buildInfoTile(
                                 "assets/icons/elevation.svg",
                                 "누적상승고도",
-                                "${movement.cumulativeElevation.toStringAsFixed(1)} m"
+                                "${_movementService.cumulativeElevation.toStringAsFixed(2)} m"
                             ),
                           ],
                         ),
@@ -715,12 +731,6 @@ class MapScreenState extends ConsumerState<MapScreen> {
               onPressed: () {
                 Navigator.of(context).pop();
                 _stopWorkout();
-
-                // (A) Navigator.push로 SummaryScreen 이동
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => SummaryScreen()),
-                );
               },
               child: const Text(
                 "종료하기",
@@ -805,13 +815,7 @@ class MapScreenState extends ConsumerState<MapScreen> {
         children: [
           // 재시작 버튼
           ElevatedButton(
-            onPressed: () {
-              setState(() {
-                _isPaused = false;
-              });
-              ref.read(movementServiceProvider).resumeStopwatch();
-              _updateElapsedTime();
-            },
+            onPressed: () {_resumeWorkout();},
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white, // 흰색 배경
               shape: RoundedRectangleBorder(

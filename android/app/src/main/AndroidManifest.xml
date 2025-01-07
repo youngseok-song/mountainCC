@@ -9,7 +9,7 @@
 
     <!-- (필수) 백그라운드 위치 권한 (Android 10+ ) -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- (옵션) 포그라운드 서비스 권한 (Android 8.0+ ) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
