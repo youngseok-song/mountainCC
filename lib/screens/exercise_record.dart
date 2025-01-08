@@ -238,46 +238,49 @@ class _SummaryScreenState extends State<SummaryScreen> {
   }
 
   List<LineChartBarData> buildSlopeColoredLines(List<FlSpot> spots) {
-    // 결과로 나올, 여러 색상의 LineChartBarData 목록
     final lines = <LineChartBarData>[];
-
     if (spots.length < 2) return lines;
 
     for (int i = 0; i < spots.length - 1; i++) {
       final curr = spots[i];
       final next = spots[i + 1];
 
-      // (1) 거리 차, 고도 차
-      final dx = next.x - curr.x; // x축(거리) 차이 (km 단위)
-      final dy = next.y - curr.y; // y축(고도) 차이 (m 단위)
-      if (dx == 0) {
-        // 만약 x값이 같으면(이상치) 넘어감
-        continue;
-      }
+      final dx = next.x - curr.x; // x축(거리) 차이 (km)
+      final dy = next.y - curr.y; // y축(고도) 차이 (m)
+      if (dx == 0) continue;
 
-      // (2) 경사도(%) = (고도 차이 / 수평 이동 거리(m)) * 100
-      //  - 여기서 next.x, curr.x가 km이면, 실제 m로 환산해야 할 수도 있음
-      //  - 가령 1.2 - 1.0 = 0.2 (km) = 200m
-      final horizontalMeter = dx * 1000;        // km -> m
-      final slope = (dy / horizontalMeter) * 100; // %
+      // 경사도 계산
+      final horizontalMeter = dx * 1000;
+      final slope = (dy / horizontalMeter) * 100;
 
-      // (3) 경사도 범위 → 색상 결정
+      // 경사도 범위 → color 결정 (이미 있는 함수)
       final color = _getSlopeColor(slope);
 
-      // (4) 이 segment 하나만의 LineChartBarData
-      //     굳이 isCurved = false 로 놓고, 점 2개만 포함.
+      // 아래처럼 "belowBarData"에 같은 color를 활용한 그라데이션 적용
       final segmentLine = LineChartBarData(
         spots: [curr, next],
         isCurved: false,
         color: color,
         barWidth: 3,
         dotData: FlDotData(show: false),
-        belowBarData: BarAreaData(show: false),
+
+        // ▼▼ 라인 아래 영역(그라데이션) ▼▼
+        belowBarData: BarAreaData(
+          show: true,
+          gradient: LinearGradient(
+            colors: [
+              // color에 약간 투명도(또는 밝기)를 부여
+              color.withAlpha(100),
+              Colors.transparent,
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
       );
 
       lines.add(segmentLine);
     }
-
     return lines;
   }
 
