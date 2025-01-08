@@ -237,6 +237,72 @@ class _SummaryScreenState extends State<SummaryScreen> {
     return polylines;
   }
 
+  List<LineChartBarData> buildSlopeColoredLines(List<FlSpot> spots) {
+    // 결과로 나올, 여러 색상의 LineChartBarData 목록
+    final lines = <LineChartBarData>[];
+
+    if (spots.length < 2) return lines;
+
+    for (int i = 0; i < spots.length - 1; i++) {
+      final curr = spots[i];
+      final next = spots[i + 1];
+
+      // (1) 거리 차, 고도 차
+      final dx = next.x - curr.x; // x축(거리) 차이 (km 단위)
+      final dy = next.y - curr.y; // y축(고도) 차이 (m 단위)
+      if (dx == 0) {
+        // 만약 x값이 같으면(이상치) 넘어감
+        continue;
+      }
+
+      // (2) 경사도(%) = (고도 차이 / 수평 이동 거리(m)) * 100
+      //  - 여기서 next.x, curr.x가 km이면, 실제 m로 환산해야 할 수도 있음
+      //  - 가령 1.2 - 1.0 = 0.2 (km) = 200m
+      final horizontalMeter = dx * 1000;        // km -> m
+      final slope = (dy / horizontalMeter) * 100; // %
+
+      // (3) 경사도 범위 → 색상 결정
+      final color = _getSlopeColor(slope);
+
+      // (4) 이 segment 하나만의 LineChartBarData
+      //     굳이 isCurved = false 로 놓고, 점 2개만 포함.
+      final segmentLine = LineChartBarData(
+        spots: [curr, next],
+        isCurved: false,
+        color: color,
+        barWidth: 3,
+        dotData: FlDotData(show: false),
+        belowBarData: BarAreaData(show: false),
+      );
+
+      lines.add(segmentLine);
+    }
+
+    return lines;
+  }
+
+// 예: 경사도 범위별 색상 함수
+  Color _getSlopeColor(double slopePercent) {
+    // 단순 예시: 경사가 양수(오르막)일 때 빨간 계열, 음수(내리막)일 때 파란 계열
+    if (slopePercent > 10) {
+      return Colors.red; // 매우 가파른 오르막
+    } else if (slopePercent > 5) {
+      return Colors.orange;
+    } else if (slopePercent > 1) {
+      return Colors.yellow;
+    } else if (slopePercent >= 0) {
+      return Colors.green;
+    } else {
+      // 내리막인 경우
+      if (slopePercent < -10) {
+        return Colors.blueAccent;
+      } else if (slopePercent < -5) {
+        return Colors.blue;
+      }
+      return Colors.lightBlue;
+    }
+  }
+
   Color _getSpeedColor(double speedKmh, double avgSpeedKmh) {
     // 예) 5단계 분류
     if (speedKmh < avgSpeedKmh * 0.5) {
@@ -520,7 +586,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
         topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
       ),
       borderData: FlBorderData(show: false),
-      lineBarsData: [lineBarData],
+      lineBarsData: buildSlopeColoredLines(_altitudeSpots),
     );
 
     return LineChart(lineChartData);
