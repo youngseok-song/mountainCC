@@ -240,15 +240,15 @@ class _SummaryScreenState extends State<SummaryScreen> {
   Color _getSpeedColor(double speedKmh, double avgSpeedKmh) {
     // 예) 5단계 분류
     if (speedKmh < avgSpeedKmh * 0.5) {
-      return Color(0xffff1500);
+      return Color(0xffff0000);
     } else if (speedKmh < avgSpeedKmh * 0.8) {
-      return Color(0xffffa200);
+      return Color(0xffffa500);
     } else if (speedKmh < avgSpeedKmh * 1.2) {
-      return Color(0xff21c400);
+      return Color(0xff2e8b57);
     } else if (speedKmh < avgSpeedKmh * 1.5) {
-      return Color(0xff00e5ff);
+      return Color(0xff4169e1);
     } else {
-      return Color(0xff001aff);
+      return Color(0xff0000ff);
     }
   }
 
