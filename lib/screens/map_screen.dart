@@ -303,11 +303,12 @@ class MapScreenState extends State<MapScreen> {
   // ------------------------------------------------------------
   Future<void> _stopWorkout() async {
     // (A) 필요한 final 통계값을 미리 보관
-    final distance = _movementService.distanceKm.toStringAsFixed(2);
-    final totalTime = _movementService.exerciseElapsedTimeString;
-    final restTime  = _movementService.restElapsedTimeString;
-    final avgSpeed  = _movementService.averageSpeedKmh.toStringAsFixed(2);
-    final cumElev   = _movementService.cumulativeElevation.toStringAsFixed(2);
+    final distance   = _movementService.distanceKm.toStringAsFixed(2); //누적거리
+    final totalTime  = _movementService.exerciseElapsedTimeString; //운동시간
+    final restTime   = _movementService.restElapsedTimeString; //휴식시간
+    final avgSpeed   = _movementService.averageSpeedKmh.toStringAsFixed(2); //평균속도
+    final cumElev    = _movementService.cumulativeElevation.toStringAsFixed(2); //상승고도
+    final cumDesc = _movementService.cumulativeDescent.toStringAsFixed(2); //하강고도
 
     // BG 위치추적 중지
     await _locationService.stopBackgroundGeolocation();
@@ -324,11 +325,14 @@ class MapScreenState extends State<MapScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => SummaryScreen(
+        locationService: _locationService,
+        movementService: _movementService,
         totalDistance: distance,
         totalTime: totalTime,
         restTime: restTime,
         avgSpeed: avgSpeed,
         cumulativeElevation: cumElev,
+        cumulativeDescent: cumDesc,
       )),
     );
 

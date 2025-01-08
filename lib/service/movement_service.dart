@@ -54,6 +54,9 @@ class MovementService {
   /// 누적 고도 (상승고도)
   double _cumulativeElevation = 0.0;
   double get cumulativeElevation => _cumulativeElevation;
+  /// 누적 고도 (하강고도)
+  double _cumulativeDescent = 0.0;
+  double get cumulativeDescent => _cumulativeDescent;
 
   /// 누적 고도를 계산할 때 기준점이 될 고도
   double? _baseAltitude;
@@ -353,6 +356,7 @@ class MovementService {
       _baseAltitude = currentAlt;
     } else if (diff < -5.0) {
       _baseAltitude = currentAlt;
+      _cumulativeDescent += (-diff);    // 또는 diff.abs()
     }
   }
 
