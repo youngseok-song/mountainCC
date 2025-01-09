@@ -129,7 +129,7 @@ class _SummaryScreenState extends State<SummaryScreen>
 
       // 지도 폴리라인(속도)
       final avgSpeedDouble = double.tryParse(widget.avgSpeed) ?? 5.0;
-      _coloredPolylines = _buildColoredSpeedPolylines(locs, avgSpeedDouble);
+      _coloredPolylines = buildInterpolatedPolylines(locs, avgSpeedDouble);
 
       setState(() => _isLoading = false);
 
@@ -157,7 +157,6 @@ class _SummaryScreenState extends State<SummaryScreen>
     _avgSpeedVal = 0;
     _maxSpeedVal = 0;
 
-    // 계산용
     double sumPace = 0;
     int paceCount = 0;
 
@@ -166,77 +165,138 @@ class _SummaryScreenState extends State<SummaryScreen>
 
     final distanceCalc = Distance();
     double cumulativeDist = 0.0; // km
+
+    // === 기존 prevLatLng, prevTime ===
     LatLng? prevLatLng;
     DateTime? prevTime;
+
+    // === NEW: tempDist, tempTime ===
+    // 보간 시 "이전 유효점과의 누적거리/시간"을 저장해둠
+    double tempDistKm = 0.0;
+    DateTime? tempTime;
 
     for (int i = 0; i < locs.length; i++) {
       final loc = locs[i];
       final currentLatLng = LatLng(loc.latitude, loc.longitude);
 
       if (i == 0) {
-        // 초기화
+        // (A) 첫 점: 초기화
         prevLatLng = currentLatLng;
         prevTime = loc.timestamp;
+
+        // 보간에 사용할 tempDist, tempTime도 초기화
+        tempDistKm = 0.0;
+        tempTime = prevTime;
         continue;
       }
 
-      // (A) 거리 (km)
+      // (B) 현재 점과 이전 점 사이 거리, 시간차
       final distMeter = distanceCalc(prevLatLng!, currentLatLng);
+      final dtSec = loc.timestamp.difference(prevTime!).inSeconds;
+
+      if (dtSec <= 0) {
+        // (C) 타임스탬프가 역순 or 같은 시각 => 보간 처리
+        //   1) 보간하지 않고 그냥 skip할 수도 있지만, 여기서는
+        //   2) time-based interpolation을 간단히 예시로 보여드립니다.
+
+        // (C-1) "다음 유효 지점"을 찾는다
+        //       i+1, i+2 ... 에서 dtSec > 0이 되는 첫 지점을 찾아서 연결
+        int j = i+1;
+        bool foundNext = false;
+        for (; j < locs.length; j++) {
+          final dtSec2 = locs[j].timestamp.difference(prevTime).inSeconds;
+          if (dtSec2 > 0) {
+            foundNext = true;
+            break;
+          }
+        }
+        if (!foundNext) {
+          // 끝까지 못 찾았으면 더 이상 보간 불가 => break
+          break;
+        }
+        // j 지점과 선형보간으로 연결
+        final nextLoc = locs[j];
+        final distMeter2 = distanceCalc(prevLatLng, LatLng(nextLoc.latitude, nextLoc.longitude));
+        final dtSec2 = locs[j].timestamp.difference(prevTime).inSeconds;
+
+        // (C-2) 누적거리, 누적시간 반영
+        cumulativeDist += distMeter2 / 1000.0;
+        // 보간된 속도, 페이스 등 계산
+        final instantSpeed = (distMeter2 / dtSec2) * 3.6;
+        double paceMinPerKm = 0;
+        if (distMeter2 > 0) {
+          paceMinPerKm = (dtSec2 / 60.0) / (distMeter2 / 1000.0);
+        }
+
+        // (C-3) Altitude
+        final fusedAlt = nextLoc.altitude;
+        // 원한다면 c ~ nextLoc 사이 altitude도 선형보간 가능
+
+        // === spot 삽입 (cumulativeDist, paceMinPerKm, fusedAlt, speed 등)
+        _paceSpots.add(FlSpot(cumulativeDist, paceMinPerKm));
+        _altSpots.add(FlSpot(cumulativeDist, fusedAlt));
+        _speedSpots.add(FlSpot(cumulativeDist, instantSpeed));
+
+        // 통계 (pace, speed) 갱신
+        if (paceMinPerKm > 0) {
+          sumPace += paceMinPerKm;
+          paceCount++;
+          if (paceMinPerKm < _minPace) _minPace = paceMinPerKm;
+          if (paceMinPerKm > _maxPace) _maxPace = paceMinPerKm;
+        }
+        if (fusedAlt < _minAltitudeVal) _minAltitudeVal = fusedAlt;
+        if (fusedAlt > _maxAltitudeVal) _maxAltitudeVal = fusedAlt;
+        if (instantSpeed > _maxSpeedVal) _maxSpeedVal = instantSpeed;
+        sumSpeed += instantSpeed;
+        speedCount++;
+
+        // (C-4) prevLatLng, prevTime = j 지점으로 이동
+        prevLatLng = LatLng(nextLoc.latitude, nextLoc.longitude);
+        prevTime = nextLoc.timestamp;
+        // for 루프 i를 j로 건너뛰기
+        i = j;
+        continue;
+      }
+
+      // (D) dtSec >= 0 => 정상
       cumulativeDist += distMeter / 1000.0;
 
-      // (B) 시간차 (초)
-      final dtSec = loc.timestamp.difference(prevTime!).inSeconds;
-      if (dtSec < 0) {
-        // timestamp가 엉켜있으면 skip
-        prevLatLng = currentLatLng;
-        prevTime = loc.timestamp;
-        continue;
-      }
-
-      // (C) 속도 (km/h)
       final instantSpeed = (distMeter / dtSec) * 3.6;
-
-      // (D) 페이스 (분/킬로) => dt(초)/60 / (dist(m)/1000)
       double paceMinPerKm = 0;
       if (distMeter > 0) {
         paceMinPerKm = (dtSec / 60.0) / (distMeter / 1000.0);
       }
 
-      // ====== Spots 추가 ======
-      // 1) Pace
+      // Altitude
+      final alt = loc.altitude;
+
+      // === Spots
       _paceSpots.add(FlSpot(cumulativeDist, paceMinPerKm));
-      // 2) Altitude
-      _altSpots.add(FlSpot(cumulativeDist, loc.altitude));
-      // 3) Speed
+      _altSpots.add(FlSpot(cumulativeDist, alt));
       _speedSpots.add(FlSpot(cumulativeDist, instantSpeed));
 
-      // ====== 통계 계산 ======
-      // (페이스)
+      // === 통계 ===
       if (paceMinPerKm > 0) {
         sumPace += paceMinPerKm;
         paceCount++;
         if (paceMinPerKm < _minPace) _minPace = paceMinPerKm;
         if (paceMinPerKm > _maxPace) _maxPace = paceMinPerKm;
       }
+      if (alt < _minAltitudeVal) _minAltitudeVal = alt;
+      if (alt > _maxAltitudeVal) _maxAltitudeVal = alt;
 
-      // (고도)
-      if (loc.altitude < _minAltitudeVal) _minAltitudeVal = loc.altitude;
-      if (loc.altitude > _maxAltitudeVal) _maxAltitudeVal = loc.altitude;
-
-      // (속도)
       sumSpeed += instantSpeed;
       speedCount++;
       if (instantSpeed > _maxSpeedVal) _maxSpeedVal = instantSpeed;
 
-      // prev 갱신
+      // 갱신
       prevLatLng = currentLatLng;
       prevTime = loc.timestamp;
     }
 
-    // 평균 계산
+    // 평균 pace, speed 계산
     _avgPace = (paceCount > 0) ? sumPace / paceCount : 0.0;
     if (_minPace == double.infinity) _minPace = 0.0;
-
     _avgSpeedVal = (speedCount > 0) ? sumSpeed / speedCount : 0.0;
   }
 
@@ -285,50 +345,131 @@ class _SummaryScreenState extends State<SummaryScreen>
 
 
   // 지도 폴리라인(속도)
-  List<Polyline> _buildColoredSpeedPolylines(List<LocationData> locs, double avgSpeedKmh) {
+  /// 폴리라인에 보간 로직을 적용한 예시 함수
+  List<Polyline> buildInterpolatedPolylines(List<LocationData> locs, double avgSpeedKmh) {
     final polylines = <Polyline>[];
     if (locs.length < 2) return polylines;
 
     final distanceCalc = Distance();
-    for (int i=0; i<locs.length-1; i++) {
+    int i = 0;
+    while (i < locs.length - 1) {
       final A = locs[i];
-      final B = locs[i+1];
+      final B = locs[i + 1];
+
       final dtSec = B.timestamp.difference(A.timestamp).inSeconds;
-      if (dtSec<0) continue;
+      if (dtSec <= 0) {
+        // (A) 역순/동일 timestamp → 보간
+        //     1) i+2..i+N 중 유효한 j 찾기
+        int j = i + 2;
+        bool foundNext = false;
+        for (; j < locs.length; j++) {
+          final dtSec2 = locs[j].timestamp.difference(A.timestamp).inSeconds;
+          if (dtSec2 > 0) {
+            foundNext = true;
+            break;
+          }
+        }
+        if (!foundNext) {
+          // 못 찾으면 여기서 종료
+          break;
+        }
+        // j 지점을 C로 잡아서, A→C를 한 번에 연결
+        final C = locs[j];
 
-      final distMeter = distanceCalc(
-        LatLng(A.latitude, A.longitude),
-        LatLng(B.latitude, B.longitude),
-      );
-      final speedKmh = (distMeter/dtSec)*3.6;
-      final color = _getSpeedColor(speedKmh, avgSpeedKmh);
+        final distMeterAC = distanceCalc(
+          LatLng(A.latitude, A.longitude),
+          LatLng(C.latitude, C.longitude),
+        );
+        final dtSecAC = C.timestamp.difference(A.timestamp).inSeconds;
+        final speedKmhAC = (distMeterAC / dtSecAC) * 3.6;
+        final colorAC = _getSpeedColor(speedKmhAC, avgSpeedKmh);
 
-      polylines.add(
-        Polyline(
-          points: [
-            LatLng(A.latitude, A.longitude),
-            LatLng(B.latitude, B.longitude),
-          ],
-          color: color,
-          strokeWidth: 4.0,
-        ),
-      );
+        polylines.add(
+          Polyline(
+            points: [
+              LatLng(A.latitude, A.longitude),
+              LatLng(C.latitude, C.longitude),
+            ],
+            color: colorAC,
+            strokeWidth: 4.0,
+          ),
+        );
+
+        // (A-2) i를 j로 점프
+        i = j;
+      } else {
+        // (B) 정상 → A→B
+        final distMeterAB = distanceCalc(
+          LatLng(A.latitude, A.longitude),
+          LatLng(B.latitude, B.longitude),
+        );
+        final speedKmhAB = (distMeterAB / dtSec) * 3.6;
+        final colorAB = _getSpeedColor(speedKmhAB, avgSpeedKmh);
+
+        polylines.add(
+          Polyline(
+            points: [
+              LatLng(A.latitude, A.longitude),
+              LatLng(B.latitude, B.longitude),
+            ],
+            color: colorAB,
+            strokeWidth: 4.0,
+          ),
+        );
+        // i++
+        i++;
+      }
     }
+
     return polylines;
   }
 
   Color _getSpeedColor(double speedKmh, double avgSpeedKmh) {
-    if (speedKmh < avgSpeedKmh * 0.5) {
-      return const Color(0xFFFF0000); // 빨강
-    } else if (speedKmh < avgSpeedKmh * 0.8) {
-      return const Color(0xFFFFA500); // 오렌지
-    } else if (speedKmh < avgSpeedKmh * 1.2) {
-      return const Color(0xFF008000); // 초록
-    } else if (speedKmh < avgSpeedKmh * 1.5) {
-      return const Color(0xFF00BFFF); // 하늘색
+    // 1) 먼저 speedKmh/avgSpeedKmh로 ratio를 구합니다.
+    final ratio = speedKmh / avgSpeedKmh;
+
+    // 2) 우리가 원하는 구간은 [0.2, 2.5].
+    //    ratio가 0.2 미만이면 0.2로, 2.5 초과이면 2.5로 '클램프'합니다.
+    const double start = 0.2;
+    const double end   = 2.5;
+
+    // (a) 실제 유효 범위 내로 보정
+    double clampedRatio;
+    if (ratio < start) {
+      clampedRatio = start;
+    } else if (ratio > end) {
+      clampedRatio = end;
     } else {
-      return const Color(0xFF0000FF); // 파랑
+      clampedRatio = ratio;
     }
+
+    // 3) 보정된 clampedRatio를 [0, 1] 구간으로 환산
+    //    예: ratio=0.2 => t=0, ratio=2.5 => t=1
+    final double t = (clampedRatio - start) / (end - start);
+
+    // 4) 이제 [0..1] 구간을 "24단계"로 쪼갭니다.
+    //    stepCount=24 → 0~23 인덱스
+    const int stepCount = 24;
+    //  - 실수 t에 (stepCount-1)을 곱해 "몇 번째 인덱스인지"를 구하고, round()로 정수화
+    final int index = (t * (stepCount - 1)).round();
+    //  - 최종 스텝 인덱스를 다시 [0..(stepCount-1)] 범위로 제한
+    //    (round() 때문에 범위를 초과할 일은 드물지만 안전책)
+    final int clampedIndex = index.clamp(0, stepCount - 1);
+
+    // 5) clampedIndex를 0 ~ (stepCount-1)로 나누어 "단계별 보간값(0~1)"로 변환
+    final double stepValue = clampedIndex / (stepCount - 1);
+
+    // 6) 빨강(0xFFFF0000)~파랑(0xFF0000FF)을 lerpColor로 보간
+    //    stepValue=0 → 빨강, stepValue=1 → 파랑
+    //    그 사이 값은 24단계 중 하나
+    final Color? color = Color.lerp(
+      const Color(0xFFFF0000), // 빨강
+      const Color(0xFF0000FF), // 파랑
+      stepValue,
+    );
+
+    // 7) null safety → non-null 단언
+    return color ?? const Color(0xFFFF0000);
   }
 
   void _fitMapToBounds() {
