@@ -1,3 +1,4 @@
+//screens/exercise_record.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -11,23 +12,27 @@ import '../models/location_data.dart';
 
 // fl_chart 임포트
 import 'package:fl_chart/fl_chart.dart';
+import 'package:intl/intl.dart';
+
 import '../service/location_service.dart';
 import '../service/movement_service.dart';
 
-/// SummaryScreen: 운동 종료 후, 요약(지도 + 그래프 + 기록정보) 화면
+/// SummaryScreen: 탭 2개 ("운동 기록 요약", "운동 기록 상세")
+///  - [기록요약]: 지도 + 제목/날짜 입력 + 범례 + 운동정보 + 버튼
+///  - [기록상세]: 고도그래프 등 fl_chart
 class SummaryScreen extends StatefulWidget {
-  // (A) MapScreen 등에서 전달받은 운동 결과들
   final LocationService locationService;
   final MovementService movementService;
-  final String totalDistance;         // 총 이동거리 (ex: "5.20")
-  final String totalTime;            // 총 운동시간 (ex: "00:30:12")
-  final String restTime;             // 휴식시간 (ex: "00:05:10")
-  final String avgSpeed;             // 평균 속도 (ex: "7.5")
-  final String cumulativeElevation;  // 누적 상승고도 (ex: "120.0")
-  final String cumulativeDescent; // 누적 하강고도 (ex: "120.0")
+
+  final String totalDistance;
+  final String totalTime;
+  final String restTime;
+  final String avgSpeed;
+  final String cumulativeElevation;
+  final String cumulativeDescent;
 
   const SummaryScreen({
-    Key? key,
+    super.key,
     required this.locationService,
     required this.movementService,
     required this.totalDistance,
@@ -36,92 +41,205 @@ class SummaryScreen extends StatefulWidget {
     required this.avgSpeed,
     required this.cumulativeElevation,
     required this.cumulativeDescent,
-  }) : super(key: key);
+  });
 
   @override
   State<SummaryScreen> createState() => _SummaryScreenState();
 }
 
-class _SummaryScreenState extends State<SummaryScreen> {
-  // (1) flutter_map 컨트롤러
+class _SummaryScreenState extends State<SummaryScreen>
+    with SingleTickerProviderStateMixin {
+
+  // (A) 탭 컨트롤러: 탭 2개
+  late TabController _tabController;
+
+  // (B) 지도 컨트롤러
   final MapController _mapController = MapController();
 
-  // [추가] Hive에서 불러올 LocationData (시간순)
-  List<LocationData> _locs = [];
+  // (C) 제목 입력 TextField 컨트롤러
+  final TextEditingController titleController = TextEditingController();
 
-  // [추가] "구간별 속도"에 따라 색이 달라지는 폴리라인들
+  // (D) 위치 데이터, 폴리라인, 차트 스팟
   List<Polyline> _coloredPolylines = [];
-
-  // 기존: 지도에 표시할 경로 점들 (시작점·끝점 표시에 사용)
   List<LatLng> _trackPoints = [];
+  final List<FlSpot> _paceSpots = [];
+  final List<FlSpot> _altSpots = [];    // 고도 그래프용 (기존 _altitudeSpots를 대체 or 병행)
+  final List<FlSpot> _speedSpots = [];
 
-  // (3) 로딩 여부
-  bool _isLoading = true;
+  // 통계 변수 (페이스)
+  double _avgPace = 0;
+  double _minPace = 0;  // “최고 페이스” (가장 빠른, 즉 분/킬로 최솟값)
+  double _maxPace = 0;  // “가장 느린 페이스”
 
-  // (4) 차트용 데이터 (x=거리, y=고도)
-  List<FlSpot> _altitudeSpots = [];
+// 고도
+  double _minAltitudeVal = 0;
+  double _maxAltitudeVal = 0;
 
-  // [중요] 지도 준비 상태 플래그
-  bool _mapReady = false;
-  bool _forceUpdate = false;
+// 속도
+  double _avgSpeedVal = 0;
+  double _maxSpeedVal = 0;
+
+  bool _isLoading = true;   // 로딩 상태
+  bool _mapReady = false;   // 지도 준비 여부
+  bool _forceUpdate = false;// 타일 리로드용
+
   @override
   void initState() {
     super.initState();
-    // (A) 화면 초기화 시, Hive 데이터 로드 -> 지도 & 그래프 데이터 구성
+    // 탭 컨트롤러 초기화
+    _tabController = TabController(length: 2, vsync: this);
+
+    // 위치데이터 로딩, 폴리라인/차트 준비
     _loadDataAndBuildMap();
   }
 
-  /// -------------------------------------------------------------------
-  /// 1) Hive 데이터 로드 -> GPX 변환 -> 지도 폴리라인 + 차트 데이터
-  /// -------------------------------------------------------------------
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  /// ---------------------------------------
+  /// 1) 위치데이터 로드 -> 지도/차트 정보 준비
+  /// ---------------------------------------
   Future<void> _loadDataAndBuildMap() async {
     try {
-      // 1) locs = Hive box의 LocationData 목록
       final box = Hive.box<LocationData>('locationBox');
-      final locs = box.values.toList(); // List<LocationData>
+      final locs = box.values.toList();
       if (locs.isEmpty) {
-        // 기록이 없다면
         setState(() => _isLoading = false);
         return;
       }
 
-      // [중요] _locs 보관 (구간별 속도 계산에 사용)
-      _locs = locs;
+      // (1) timestamp 순 정렬
+      locs.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-      // 2) locs -> GPX 문자열
+      // (2) 차트 데이터 생성
+      _generateChartData(locs);
+
+
+      // gpx 변환
       final gpxStr = _buildGpxString(locs);
 
-      // 3) GPX -> latlng
+      // latlng 리스트 준비 -> 지도 마커/폴리라인 범위
       final parsedPoints = _parseGpxToLatLng(gpxStr);
-      // 지도에 마커(시작점·끝점) 표시를 위해 보관
       _trackPoints = parsedPoints;
 
-      // 4) locs -> (distance, altitude) -> fl_chart용 FlSpot 리스트
-      final altSpots = _makeAltitudeDistanceSpots(locs);
-      _altitudeSpots = altSpots;
+      // 차트(고도 vs 거리)
 
-      // (5) "평균 속도" 문자열 -> double 변환 (km/h)
+      // 지도 폴리라인(속도)
       final avgSpeedDouble = double.tryParse(widget.avgSpeed) ?? 5.0;
+      _coloredPolylines = _buildColoredSpeedPolylines(locs, avgSpeedDouble);
 
-      // (6) locs에서 인접 지점 간 속도를 계산 → 여러 색상 폴리라인 생성
-      _coloredPolylines = _buildColoredSpeedPolylines(_locs, avgSpeedDouble);
+      setState(() => _isLoading = false);
 
-      // 로딩 상태 해제
-      setState(() {
-        _isLoading = false;
-      });
-
-      // [추가] 데이터 준비가 끝났으므로, 만약 지도도 준비됐다면 fitCamera
-      //  (지도가 준비되지 않은 상태라면, onMapReady에서 다시 시도)
+      // 지도 범위 맞추기
       _fitMapToBounds();
-
     } catch (e) {
-      debugPrint("오류 발생: $e");
+      debugPrint("오류: $e");
       setState(() => _isLoading = false);
     }
   }
 
-  /// locs -> GPX XML 문자열 생성 (기존 코드)
+  void _generateChartData(List<LocationData> locs) {
+    // 1) 초기화
+    _paceSpots.clear();
+    _altSpots.clear();
+    _speedSpots.clear();
+
+    _avgPace = 0;
+    _minPace = double.infinity;
+    _maxPace = 0;
+
+    _minAltitudeVal = double.infinity;
+    _maxAltitudeVal = 0;
+
+    _avgSpeedVal = 0;
+    _maxSpeedVal = 0;
+
+    // 계산용
+    double sumPace = 0;
+    int paceCount = 0;
+
+    double sumSpeed = 0;
+    int speedCount = 0;
+
+    final distanceCalc = Distance();
+    double cumulativeDist = 0.0; // km
+    LatLng? prevLatLng;
+    DateTime? prevTime;
+
+    for (int i = 0; i < locs.length; i++) {
+      final loc = locs[i];
+      final currentLatLng = LatLng(loc.latitude, loc.longitude);
+
+      if (i == 0) {
+        // 초기화
+        prevLatLng = currentLatLng;
+        prevTime = loc.timestamp;
+        continue;
+      }
+
+      // (A) 거리 (km)
+      final distMeter = distanceCalc(prevLatLng!, currentLatLng);
+      cumulativeDist += distMeter / 1000.0;
+
+      // (B) 시간차 (초)
+      final dtSec = loc.timestamp.difference(prevTime!).inSeconds;
+      if (dtSec < 0) {
+        // timestamp가 엉켜있으면 skip
+        prevLatLng = currentLatLng;
+        prevTime = loc.timestamp;
+        continue;
+      }
+
+      // (C) 속도 (km/h)
+      final instantSpeed = (distMeter / dtSec) * 3.6;
+
+      // (D) 페이스 (분/킬로) => dt(초)/60 / (dist(m)/1000)
+      double paceMinPerKm = 0;
+      if (distMeter > 0) {
+        paceMinPerKm = (dtSec / 60.0) / (distMeter / 1000.0);
+      }
+
+      // ====== Spots 추가 ======
+      // 1) Pace
+      _paceSpots.add(FlSpot(cumulativeDist, paceMinPerKm));
+      // 2) Altitude
+      _altSpots.add(FlSpot(cumulativeDist, loc.altitude));
+      // 3) Speed
+      _speedSpots.add(FlSpot(cumulativeDist, instantSpeed));
+
+      // ====== 통계 계산 ======
+      // (페이스)
+      if (paceMinPerKm > 0) {
+        sumPace += paceMinPerKm;
+        paceCount++;
+        if (paceMinPerKm < _minPace) _minPace = paceMinPerKm;
+        if (paceMinPerKm > _maxPace) _maxPace = paceMinPerKm;
+      }
+
+      // (고도)
+      if (loc.altitude < _minAltitudeVal) _minAltitudeVal = loc.altitude;
+      if (loc.altitude > _maxAltitudeVal) _maxAltitudeVal = loc.altitude;
+
+      // (속도)
+      sumSpeed += instantSpeed;
+      speedCount++;
+      if (instantSpeed > _maxSpeedVal) _maxSpeedVal = instantSpeed;
+
+      // prev 갱신
+      prevLatLng = currentLatLng;
+      prevTime = loc.timestamp;
+    }
+
+    // 평균 계산
+    _avgPace = (paceCount > 0) ? sumPace / paceCount : 0.0;
+    if (_minPace == double.infinity) _minPace = 0.0;
+
+    _avgSpeedVal = (speedCount > 0) ? sumSpeed / speedCount : 0.0;
+  }
+
   String _buildGpxString(List<LocationData> locs) {
     final buffer = StringBuffer();
     buffer.writeln('<?xml version="1.0" encoding="UTF-8"?>');
@@ -144,11 +262,9 @@ class _SummaryScreenState extends State<SummaryScreen> {
     return buffer.toString();
   }
 
-  /// gpxXml -> List LatLng (지도 폴리라인 표시용) (기존 코드)
   List<LatLng> _parseGpxToLatLng(String gpxXml) {
     final gpxData = GpxReader().fromString(gpxXml);
     final result = <LatLng>[];
-
     if (gpxData.trks != null) {
       for (final trk in gpxData.trks!) {
         if (trk.trksegs != null) {
@@ -167,61 +283,26 @@ class _SummaryScreenState extends State<SummaryScreen> {
     return result;
   }
 
-  /// locs -> (x=거리(km), y=고도(m))를 FlSpot 형태로 변환 (기존 코드)
-  List<FlSpot> _makeAltitudeDistanceSpots(List<LocationData> locs) {
-    final spots = <FlSpot>[];
-    if (locs.isEmpty) return spots;
 
-    double cumulativeDist = 0.0;
-    final distanceCalc = Distance();
-
-    for (int i = 0; i < locs.length; i++) {
-      if (i == 0) {
-        cumulativeDist = 0.0;
-      } else {
-        final distMeter = distanceCalc(
-          LatLng(locs[i-1].latitude, locs[i-1].longitude),
-          LatLng(locs[i].latitude,   locs[i].longitude),
-        );
-        cumulativeDist += distMeter;
-      }
-
-      // x축 = 누적 거리(km), y축 = 고도(m)
-      spots.add(FlSpot(cumulativeDist / 1000.0, locs[i].altitude));
-    }
-    return spots;
-  }
-
-  // -------------------------------------------------------------------
-  // "구간별 속도"에 따라 여러 색을 가진 폴리라인 생성
-  // -------------------------------------------------------------------
+  // 지도 폴리라인(속도)
   List<Polyline> _buildColoredSpeedPolylines(List<LocationData> locs, double avgSpeedKmh) {
     final polylines = <Polyline>[];
     if (locs.length < 2) return polylines;
 
     final distanceCalc = Distance();
-
-    for (int i = 0; i < locs.length - 1; i++) {
+    for (int i=0; i<locs.length-1; i++) {
       final A = locs[i];
-      final B = locs[i + 1];
-
-      // (1) 시간 차(초)
+      final B = locs[i+1];
       final dtSec = B.timestamp.difference(A.timestamp).inSeconds;
-      if (dtSec <= 0) continue;
+      if (dtSec<0) continue;
 
-      // (2) 거리(m)
       final distMeter = distanceCalc(
         LatLng(A.latitude, A.longitude),
         LatLng(B.latitude, B.longitude),
       );
-
-      // (3) 속도(km/h)
-      final speedKmh = (distMeter / dtSec) * 3.6;
-
-      // (4) 속도 → 색상
+      final speedKmh = (distMeter/dtSec)*3.6;
       final color = _getSpeedColor(speedKmh, avgSpeedKmh);
 
-      // (5) 짧은 폴리라인 1개
       polylines.add(
         Polyline(
           points: [
@@ -233,131 +314,47 @@ class _SummaryScreenState extends State<SummaryScreen> {
         ),
       );
     }
-
     return polylines;
   }
 
-  List<LineChartBarData> buildSlopeColoredLines(List<FlSpot> spots) {
-    final lines = <LineChartBarData>[];
-    if (spots.length < 2) return lines;
-
-    for (int i = 0; i < spots.length - 1; i++) {
-      final curr = spots[i];
-      final next = spots[i + 1];
-
-      final dx = next.x - curr.x; // x축(거리) 차이 (km)
-      final dy = next.y - curr.y; // y축(고도) 차이 (m)
-      if (dx == 0) continue;
-
-      // 경사도 계산
-      final horizontalMeter = dx * 1000;
-      final slope = (dy / horizontalMeter) * 100;
-
-      // 경사도 범위 → color 결정 (이미 있는 함수)
-      final color = _getSlopeColor(slope);
-
-      // 아래처럼 "belowBarData"에 같은 color를 활용한 그라데이션 적용
-      final segmentLine = LineChartBarData(
-        spots: [curr, next],
-        isCurved: false,
-        color: color,
-        barWidth: 3,
-        dotData: FlDotData(show: false),
-
-        // ▼▼ 라인 아래 영역(그라데이션) ▼▼
-        belowBarData: BarAreaData(
-          show: true,
-          gradient: LinearGradient(
-            colors: [
-              // color에 약간 투명도(또는 밝기)를 부여
-              color.withAlpha(100),
-              Colors.transparent,
-            ],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-      );
-
-      lines.add(segmentLine);
-    }
-    return lines;
-  }
-
-// 예: 경사도 범위별 색상 함수
-  Color _getSlopeColor(double slopePercent) {
-    // 단순 예시: 경사가 양수(오르막)일 때 빨간 계열, 음수(내리막)일 때 파란 계열
-    if (slopePercent > 10) {
-      return Colors.red; // 매우 가파른 오르막
-    } else if (slopePercent > 5) {
-      return Colors.orange;
-    } else if (slopePercent > 1) {
-      return Colors.yellow;
-    } else if (slopePercent >= 0) {
-      return Colors.green;
-    } else {
-      // 내리막인 경우
-      if (slopePercent < -10) {
-        return Colors.blueAccent;
-      } else if (slopePercent < -5) {
-        return Colors.blue;
-      }
-      return Colors.lightBlue;
-    }
-  }
-
   Color _getSpeedColor(double speedKmh, double avgSpeedKmh) {
-    // 예) 5단계 분류
     if (speedKmh < avgSpeedKmh * 0.5) {
-      return Color(0xffff0000);
+      return const Color(0xFFFF0000); // 빨강
     } else if (speedKmh < avgSpeedKmh * 0.8) {
-      return Color(0xffffa500);
+      return const Color(0xFFFFA500); // 오렌지
     } else if (speedKmh < avgSpeedKmh * 1.2) {
-      return Color(0xff2e8b57);
+      return const Color(0xFF008000); // 초록
     } else if (speedKmh < avgSpeedKmh * 1.5) {
-      return Color(0xff4169e1);
+      return const Color(0xFF00BFFF); // 하늘색
     } else {
-      return Color(0xff0000ff);
+      return const Color(0xFF0000FF); // 파랑
     }
   }
 
-  // -------------------------------------------------------------------
-  // (중요) 지도 범위를 "경로" 전체가 화면에 들어오도록 조정
-  // -------------------------------------------------------------------
   void _fitMapToBounds() {
-    // 1) 지도가 아직 준비되지 않았다면 리턴
     if (!_mapReady) return;
-    // 2) 경로가 없으면 리턴
     if (_trackPoints.isEmpty) return;
-    final bounds = LatLngBounds.fromPoints(_trackPoints);
 
-    // (3) 유효성 확인
-    //     southWest == northEast 면 "모든 점이 동일"하다고 볼 수 있음
+    final bounds = LatLngBounds.fromPoints(_trackPoints);
     bool isLatLngBoundsValid(LatLngBounds b) {
-      // southWest와 northEast가 같은 좌표인지 체크
       return (b.southWest.latitude != b.northEast.latitude ||
           b.southWest.longitude != b.northEast.longitude);
     }
+    if (!isLatLngBoundsValid(bounds)) return;
 
-    if (!isLatLngBoundsValid(bounds)) {
-      // 유효하지 않으면 리턴
-      return;
-    }
-
-    // 4) 지도 카메라를 bounds에 맞추기 (flutter_map 4.x)
     _mapController.fitCamera(
       CameraFit.bounds(
         bounds: bounds,
-        padding: const EdgeInsets.all(50), // 테두리 여백
-        maxZoom: 18,                      // 너무 크게 확대되지 않도록 제한
+        padding: const EdgeInsets.all(50),
+        maxZoom: 18,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    // 로딩 중이면 로딩 표시
     if (_isLoading) {
+      // 로딩 중 화면
       return Scaffold(
         appBar: AppBar(
           automaticallyImplyLeading: false,
@@ -367,138 +364,232 @@ class _SummaryScreenState extends State<SummaryScreen> {
       );
     }
 
-    // 로딩 완료된 경우
-    return Scaffold(
-      // 뒤로가기 버튼 제거
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: const Text("운동 기록 요약"),
-      ),
-      body: Column(
-        children: [
-          // (A) 지도 (2/4)
-          Expanded(
-            flex: 2,
-            child: _buildMap(),
-          ),
-
-          // (B) 그래프 (1/4)
-          Expanded(
-            flex: 1,
-            child: Padding(
-              padding: const EdgeInsets.all(10),
-              child: _buildAltitudeDistanceChart(),
-            ),
-          ),
-          Center(
-            child: RichText(
-              textAlign: TextAlign.center,
-              text: TextSpan(
-                children: [
-                  TextSpan(
-                    text: "운동시간 : ${widget.totalTime} ",
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black,),
-                  ),
-                  TextSpan(
-                    text: "(휴식시간 : ${widget.restTime})",
-                    style: TextStyle(fontSize: 14, color: Colors.grey),
-                  ),
+    // *** AppBar 제거 + body에서 탭 구성 ***
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        body: Column(
+          children: [
+            // 상단 탭 영역
+            Container(
+              color: Colors.white,
+              child: TabBar(
+                controller: _tabController,
+                labelColor: Colors.black,
+                unselectedLabelColor: Colors.grey,
+                tabs: const [
+                  Tab(text: "운동 기록 요약"),
+                  Tab(text: "운동 기록 상세"),
                 ],
               ),
             ),
-          ),
-          // (C) 운동 정보 (테이블 형태)
-          _buildDataMatrix(),
 
-          // (D) 하단 버튼
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                // 저장 안 함
-                ElevatedButton(
-                  onPressed: () async {
-                    // “저장하지 않고 종료” 로직
-                    // 1) BG 추적, MovementService 정리
-                    await widget.locationService.stopBackgroundGeolocation();
-                    widget.movementService.resetAll();
-                    // 2) Hive 기록 삭제
-                    await Hive.box<LocationData>('locationBox').clear();
-                    // 3) 화면 닫기
-                    Navigator.pop(context);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.grey[300],
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  ),
-                  child: const Text("저장하지 않고 종료", style: TextStyle(color: Colors.black)),
-                ),
-                // 저장 후 종료
-                ElevatedButton(
-                  onPressed: () {
-                    // 기록 저장 로직 (ex: 서버 업로드, etc)
-                    Navigator.pop(context);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.redAccent,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  ),
-                  child: const Text("기록 저장 후 종료", style: TextStyle(color: Colors.white)),
-                ),
-              ],
+            // 탭 내용
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildRecordSummaryTab(),
+                  _buildRecordDetailTab(),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  /// ------------------------------------------------------
-  /// (A) flutter_map 빌드 (onMapReady + fitCamera)
-  /// ------------------------------------------------------
+  // -----------------------------------------------
+  // (1) 기록요약 탭: 지도 + 제목영역 + 범례 + 운동정보 + 버튼
+  // -----------------------------------------------
+  Widget _buildRecordSummaryTab() {
+    final screenHeight = MediaQuery.of(context).size.height;
+
+    return Column(
+      children: [
+        const SizedBox(height: 15),
+        // 제목 + 날짜
+        _buildTitleSection(),
+
+        const SizedBox(height: 30),
+
+        // 지도 (화면높이의 30%)
+        SizedBox(
+          height: screenHeight * 0.3,
+          child: _buildMap(),
+        ),
+
+        const SizedBox(height: 5),
+
+        // “느림~빠름” 색 범례
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal:16, vertical: 8),
+          child: _buildSpeedLegendBar(),
+        ),
+
+        const SizedBox(height: 15),
+
+        // 운동정보 + 버튼 : 남은 공간 사용
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                children: [
+                  const SizedBox(height: 15),
+
+                  // 운동시간 / 휴식시간
+                  Center(
+                    child: RichText(
+                      textAlign: TextAlign.center,
+                      text: TextSpan(
+                        children: [
+                          TextSpan(
+                            text: "운동시간 : ${widget.totalTime} ",
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black,
+                            ),
+                          ),
+                          TextSpan(
+                            text: "(휴식시간 : ${widget.restTime})",
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // 운동 정보 테이블
+                  _buildDataMatrix(),
+                ],
+              ),
+
+              // 버튼
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    ElevatedButton(
+                      onPressed: () async {
+                        // 저장 안 함
+                        await widget.locationService.stopBackgroundGeolocation();
+                        widget.movementService.resetAll();
+                        await Hive.box<LocationData>('locationBox').clear();
+                        if (!mounted) return;
+                        Navigator.pop(context);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey[300],
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      child: const Text(
+                        "저장하지 않고 종료",
+                        style: TextStyle(color: Colors.black),
+                      ),
+                    ),
+                    ElevatedButton(
+                      onPressed: () {
+                        // 저장 후 종료
+                        Navigator.pop(context);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      child: const Text(
+                        "기록 저장 후 종료",
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // -----------------------------------------------
+  // (2) 기록상세 탭: 고도그래프 (fl_chart 예시)
+  // -----------------------------------------------
+  Widget _buildRecordDetailTab() {
+    // 데이터가 전혀 없을 때 예외처리
+    if (_paceSpots.isEmpty && _altSpots.isEmpty && _speedSpots.isEmpty) {
+      return const Center(child: Text("기록된 데이터가 없어 그래프를 표시할 수 없습니다."));
+    }
+
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            // 1) 페이스
+            const Text("페이스", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            _buildPaceChart(),
+            _buildPaceSummary(),
+            const SizedBox(height: 30),
+
+            // 2) 고도
+            const Text("고도", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            _buildAltitudeChart(),
+            _buildAltitudeSummary(),
+            const SizedBox(height: 30),
+
+            // 3) 속도
+            const Text("속도", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            _buildSpeedChart(),
+            _buildSpeedSummary(),
+            const SizedBox(height: 30),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // -----------------------------------------------
+  // 지도
+  // -----------------------------------------------
   Widget _buildMap() {
     return FlutterMap(
       mapController: _mapController,
       options: MapOptions(
-        // (1) onMapReady: 지도가 준비된 순간
         onMapReady: () {
           _mapReady = true;
-          // 이 시점에 _fitMapToBounds() 재호출해서, 이미 _trackPoints 있으면 맞추기
           _fitMapToBounds();
           setState(() => _forceUpdate = true);
         },
-
-        // (2) 초기 위치는 혹시 모를 상황 대비
         initialCenter: _trackPoints.isNotEmpty
             ? _trackPoints.first
             : LatLng(37.5665, 126.9780),
         initialZoom: 16.0,
-
-        // 지도 회전 금지
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
         ),
       ),
       children: [
-        // 기본 타일
         TileLayer(
           key: ValueKey(_forceUpdate),
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           maxZoom: 19,
         ),
-
-        // 속도별 여러 색상 폴리라인
         if (_coloredPolylines.isNotEmpty)
-          PolylineLayer(
-            polylines: _coloredPolylines,
-          ),
-
-        // (시작점 & 끝점 마커)
+          PolylineLayer(polylines: _coloredPolylines),
         if (_trackPoints.isNotEmpty)
           MarkerLayer(
             markers: [
-              // 시작점
               Marker(
                 width: 15,
                 height: 15,
@@ -509,7 +600,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
                   height: 15,
                 ),
               ),
-              // 끝점
               Marker(
                 width: 15,
                 height: 15,
@@ -526,84 +616,106 @@ class _SummaryScreenState extends State<SummaryScreen> {
     );
   }
 
-  /// ------------------------------------------
-  /// (B) 고도-거리 라인차트 (fl_chart)
-  /// ------------------------------------------
-  Widget _buildAltitudeDistanceChart() {
-    if (_altitudeSpots.isEmpty) {
-      return const Center(child: Text("고도/거리 데이터가 없습니다."));
-    }
-
-    final lineBarData = LineChartBarData(
-      spots: _altitudeSpots,
-      isCurved: true,           // 곡선
-      color: Colors.blue,       // 선 색
-      barWidth: 3,              // 선 두께
-      dotData: FlDotData(show: false),
-      belowBarData: BarAreaData(
-        show: true,
-        gradient: LinearGradient(
-          colors: [
-            Colors.blue.withAlpha(100),
-            Colors.transparent,
-          ],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
+  // -----------------------------------------------
+  // (A) “느림~빠름” 색상 범례
+  // -----------------------------------------------
+  Widget _buildSpeedLegendBar() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // 느림
+        const Text(
+          "느림",
+          style: TextStyle(fontSize: 14, color: Colors.black),
         ),
-      ),
-    );
 
-    final lineChartData = LineChartData(
-      minY: 0,
-      gridData: FlGridData(show: true),
-      titlesData: FlTitlesData(
-        show: true,
-        leftTitles: AxisTitles(
-          sideTitles: SideTitles(
-            showTitles: true,
-            interval: 100,  // y축 고도 50m 간격(필요에 따라 조정)
-            reservedSize: 40,
-            getTitlesWidget: (value, meta) {
-              final altitudeM = value.round();
-              return Text("$altitudeM m", style: const TextStyle(fontSize: 11));
-            },
+        // 그라데이션 Bar
+        Container(
+          width: 300,
+          height: 10,
+          margin: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            gradient: const LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                // 빨강→주황→노랑→연두→초록→하늘→파랑
+                Color(0xFFFF0000),
+                Color(0xFFFF8000),
+                Color(0xFFFFFF00),
+                Color(0xFF80FF00),
+                Color(0xFF00FF00),
+                Color(0xFF00FFFF),
+                Color(0xFF0000FF),
+              ],
+              stops: [0.0, 0.17, 0.34, 0.51, 0.68, 0.85, 1.0], // 균등 분배 예시
+            ),
           ),
         ),
-        bottomTitles: AxisTitles(
-          sideTitles: SideTitles(
-            showTitles: true,
-            interval: 2, // x축 1km 간격(예시)
-            reservedSize: 44,
-            getTitlesWidget: (value, meta) {
-              final distanceKm = value.toStringAsFixed(1);
-              // -0.3 라디안(약 -17도) 기울여 표시
-              return Transform.rotate(
-                angle: -0.3,
-                alignment: Alignment.center,
-                child: Text("$distanceKm km", style: const TextStyle(fontSize: 11)),
-              );
-            },
-          ),
-        ),
-        rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-      ),
-      borderData: FlBorderData(show: false),
-      lineBarsData: buildSlopeColoredLines(_altitudeSpots),
-    );
 
-    return LineChart(lineChartData);
+        // 빠름
+        const Text(
+          "빠름",
+          style: TextStyle(fontSize: 14, color: Colors.black),
+        ),
+      ],
+    );
   }
 
-  /// ------------------------------------------
-  /// (C) 운동 정보 (5줄×2칸 Table)
-  /// ------------------------------------------
+  // -----------------------------------------------
+  // (B) “제목 + 날짜”
+  // -----------------------------------------------
+  Widget _buildTitleSection() {
+    // 현재 시각
+    final now = DateTime.now();
+    final dateStr = DateFormat('yyyy-MM-dd HH:mm').format(now);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start, //왼쪽정렬
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.directions_walk, color: Colors.grey),
+              const SizedBox(width: 8),
+
+              // 제목 (TextField)
+              Expanded(
+                child: TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    hintText: "운동 제목을 입력해주세요.",
+                  ),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          //const SizedBox(height: 6),
+          // 날짜 텍스트
+          Text(
+            dateStr,
+            style: const TextStyle(fontSize: 14, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // -----------------------------------------------
+  // (C) 운동 정보 테이블
+  // -----------------------------------------------
   Widget _buildDataMatrix() {
     return Container(
       padding: const EdgeInsets.all(12),
       child: Table(
         children: [
-          // 2) "누적거리" / "평균속도"
           TableRow(
             children: [
               _buildTitleCellWithIcon(
@@ -616,14 +728,12 @@ class _SummaryScreenState extends State<SummaryScreen> {
               ),
             ],
           ),
-          // 3) 실제 값
           TableRow(
             children: [
               _buildValueCell("${widget.totalDistance} km"),
               _buildValueCell("${widget.avgSpeed} km/h"),
             ],
           ),
-          // 4) "누적상승고도" / "누적하강고도"
           TableRow(
             children: [
               _buildTitleCellWithIcon(
@@ -636,7 +746,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
               ),
             ],
           ),
-          // 5) 실제 값
           TableRow(
             children: [
               _buildValueCell("${widget.cumulativeElevation} m"),
@@ -648,7 +757,6 @@ class _SummaryScreenState extends State<SummaryScreen> {
     );
   }
 
-  /// 아이콘 + 텍스트를 함께 표시하는 Title 셀
   Widget _buildTitleCellWithIcon({
     required String iconPath,
     required String title,
@@ -659,14 +767,12 @@ class _SummaryScreenState extends State<SummaryScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // 1) SVG 아이콘
             SvgPicture.asset(
               iconPath,
               width: 18,
               height: 18,
             ),
             const SizedBox(width: 6),
-            // 2) 텍스트
             Text(
               title,
               style: const TextStyle(
@@ -681,6 +787,106 @@ class _SummaryScreenState extends State<SummaryScreen> {
     );
   }
 
+  Widget _buildPaceChart() {
+    return _buildLineChart(
+      spots: _paceSpots,
+      color: Colors.purple,
+      minY: 0,
+      leftInterval: 2.0,     // pace 2분 간격
+      bottomInterval: 1.0,   // 거리 1km
+      noDataText: "페이스 데이터가 없습니다.",
+      // maxY: 30,           // 필요 시 억지로 30분/킬로까지
+    );
+  }
+
+  Widget _buildAltitudeChart() {
+    return _buildLineChart(
+      spots: _altSpots,
+      color: Colors.orange,
+      minY: 0,
+      leftInterval: 50.0,  // 고도 50m 간격
+      noDataText: "고도 데이터가 없습니다.",
+      unitY: "m",
+    );
+  }
+
+  Widget _buildSpeedChart() {
+    return _buildLineChart(
+      spots: _speedSpots,
+      color: Colors.redAccent,
+      minY: 0,
+      leftInterval: 5.0,  // 속도 5km/h 간격
+      noDataText: "속도 데이터가 없습니다.",
+    );
+  }
+
+  Widget _buildSummaryRow({
+    required String leftTitle,
+    required String leftValue,
+    required String rightTitle,
+    required String rightValue,
+  }) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        Column(
+          children: [
+            Text(leftTitle),
+            Text(leftValue),
+          ],
+        ),
+        Column(
+          children: [
+            Text(rightTitle),
+            Text(rightValue),
+          ],
+        ),
+      ],
+    );
+  }
+
+
+  Widget _buildPaceSummary() {
+    final avg = _formatPace(_avgPace);
+    final best = _formatPace(_minPace); // minPace = 가장 빠른
+
+    return _buildSummaryRow(
+      leftTitle: "평균 페이스",
+      leftValue: avg,
+      rightTitle: "최고 페이스",
+      rightValue: best,
+    );
+  }
+
+// 고도
+  Widget _buildAltitudeSummary() {
+    return _buildSummaryRow(
+      leftTitle: "최저 고도",
+      leftValue: "${_minAltitudeVal.toStringAsFixed(2)} m",
+      rightTitle: "최고 고도",
+      rightValue: "${_maxAltitudeVal.toStringAsFixed(2)} m",
+    );
+  }
+
+// 속도
+  Widget _buildSpeedSummary() {
+    return _buildSummaryRow(
+      leftTitle: "평균 속도",
+      leftValue: "${_avgSpeedVal.toStringAsFixed(2)} km/h",
+      rightTitle: "최대 속도",
+      rightValue: "${_maxSpeedVal.toStringAsFixed(2)} km/h",
+    );
+  }
+
+// pace를 "분'초\"" 형태로
+  String _formatPace(double pace) {
+    if (pace <= 0) return "--'--\"";
+    final minPart = pace.floor();
+    final secPart = ((pace - minPart) * 60).round();
+    return "$minPart'${secPart.toString().padLeft(2, '0')}\"";
+  }
+
+
   Widget _buildValueCell(String text) {
     return TableCell(
       child: Padding(
@@ -694,4 +900,85 @@ class _SummaryScreenState extends State<SummaryScreen> {
       ),
     );
   }
+}
+
+
+Widget _buildLineChart({
+  required List<FlSpot> spots,
+  required Color color,
+  double minY = 0,
+  double? maxY,
+  double leftInterval = 5.0,
+  double bottomInterval = 1.0,
+  String unitY = "",   // y축 라벨 단위(예: "m", "", etc.)
+  String? noDataText,  // "데이터가 없습니다." 커스텀 문구
+}) {
+  if (spots.isEmpty) {
+    return Center(child: Text(noDataText ?? "데이터가 없습니다."));
+  }
+
+  final lineBarData = LineChartBarData(
+    spots: spots,
+    isCurved: true,
+    color: color,
+    barWidth: 2,
+    dotData: FlDotData(show: false),
+    belowBarData: BarAreaData(
+      show: true,
+      color: color.withAlpha(50),
+    ),
+  );
+
+  return SizedBox(
+    height: 200,
+    child: LineChart(
+      LineChartData(
+        borderData: FlBorderData(
+          show: true,
+          border: const Border(
+            left: BorderSide(color: Colors.grey, width: 1),
+            bottom: BorderSide(color: Colors.grey, width: 1),
+            right: BorderSide(color: Colors.transparent),
+            top: BorderSide(color: Colors.transparent),
+          ),
+        ),
+        minY: minY,
+        maxY: maxY,  // 필요하면 null 가능
+        gridData: FlGridData(show: true),
+        titlesData: FlTitlesData(
+          // 왼쪽(Y축)
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,       // 왼쪽만 표시
+              interval: leftInterval,
+              getTitlesWidget: (value, meta) {
+                // 만약 이 값이 y축 최대값과 같다면 표시 안 함
+                if (value == meta.max) {
+                  return const SizedBox.shrink(); // 빈 위젯 반환
+                }
+                // 그 외는 기존 로직
+                final label = value.toStringAsFixed(0);
+                return Text("$label$unitY", style: const TextStyle(fontSize: 12));
+              },
+            ),
+          ),
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,       // 아래만 표시
+              interval: 1.5,           // 예) 1km마다 라벨
+              getTitlesWidget: (value, meta) {
+                if (value == meta.max) {
+                  return const SizedBox.shrink(); // 맨 끝 라벨 지움
+                }
+                return Text("${value.toStringAsFixed(1)} km", style: const TextStyle(fontSize: 12));
+              },
+            ),
+          ),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+        lineBarsData: [lineBarData],
+      ),
+    ),
+  );
 }

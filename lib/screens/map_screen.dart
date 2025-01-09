@@ -400,9 +400,9 @@ class MapScreenState extends State<MapScreen> {
     final rawAccuracy = _currentBgLocation?.coords.accuracy ?? 5.0;
     // 2) clamp(10, 100) -> 최소 10, 최대 100
     final clampedAccuracy = rawAccuracy.clamp(30.0, 100.0);
-    final debugStatus = "ignoreDataFirst3s=$_ignoreDataFirst3s, isPaused=$_isPaused, isStartingWorkout=$_isStartingWorkout";
+    //final debugStatus = "ignoreDataFirst3s=$_ignoreDataFirst3s, isPaused=$_isPaused, isStartingWorkout=$_isStartingWorkout";
     return Scaffold(
-      appBar: AppBar(
+      /*appBar: AppBar(
         title: Text(
           debugStatus,
           style: const TextStyle(
@@ -411,7 +411,7 @@ class MapScreenState extends State<MapScreen> {
             color: Colors.black,       // 글씨 색상
           ),
         ),
-      ),
+      ),*/
       body: Stack(
         children: [
           // -------------------------------------------------
