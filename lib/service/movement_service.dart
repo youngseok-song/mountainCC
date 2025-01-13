@@ -256,47 +256,32 @@ class MovementService {
     // 필요 시 특정 조건에 따라 무시
     if (ignoreData) return;
 
-    // (A) Outlier 검사
-    if (isOutlier(loc)) {
-      return;
-    }
+    // (1) 폴리라인에 새 점 추가
+    _polylinePoints.add(LatLng(loc.coords.latitude, loc.coords.longitude));
 
-    // (B) EKF Predict (dt 계산)
-    double dt = _computeDeltaTime(loc);
-    _ekf.predict(dt);
-
-    // (C) EKF UpdateGPS
-    //     lat->y, lon->x (단순 scale) or ENU 변환
-    double lat = loc.coords.latitude;
-    double lon = loc.coords.longitude;
-    const double scale = 111000.0; // 약 1도 -> 111km
-
-    double gpsX = lon * scale;
-    double gpsY = lat * scale;
-    _ekf.updateGPS(gpsX, gpsY);
-
-    // (D) EKF 결과( x,y )를 활용할지, RAW GPS를 그대로 쓸지 결정
-    //     예: 폴리라인을 EKF 기반으로 그리고 싶다면:
-    double ekfX = _ekf.x;
-    double ekfY = _ekf.y;
-    double ekfLat = ekfY / scale;
-    double ekfLon = ekfX / scale;
-
-    // 대신 "raw gps" 경로가 아닌 "보정된 ekf" 경로를 저장해볼 수 있음
-    _polylinePoints.add(LatLng(ekfLat, ekfLon));
-
-    // (E) 고도 계산 (기존 SensorFusion + Baro)
+    // (2) GPS 고도
     final gpsAlt = loc.coords.altitude;
+
+    // (3) SensorFusion에 GPS(x,y,alt) 전달
+    final double scale = 1e5;
+    final double gpsX = loc.coords.longitude * scale;
+    final double gpsY = loc.coords.latitude * scale;
+    _fusion.onGps(gpsX, gpsY, gpsAlt);
+
+    // (4) Baro + GPS 융합 고도
     final fusedAlt = _fusion.getFusedAltitude() ?? gpsAlt;
+
+    // (5) 누적 고도 계산
     _updateCumulativeElevation(fusedAlt);
-    // Baro offset 주기적 보정
+
+    // (6) 3분마다 Baro vs GPS Offset을 조금씩 보정
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     if (nowMs - _lastOffsetUpdateTime > _offsetUpdateInterval) {
       _updateBaroOffsetIfNeeded(gpsAlt);
       _lastOffsetUpdateTime = nowMs;
     }
 
-    // (F) Outlier 판단용 기록(고도 기준)
+    // (7) Outlier 판단용 기록
     _lastAltitude = gpsAlt;
     _lastTimestampMs = _parseTimestamp(loc.timestamp)
         ?? DateTime.now().millisecondsSinceEpoch;
