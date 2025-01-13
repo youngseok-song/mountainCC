@@ -451,7 +451,7 @@ class _SummaryScreenState extends State<SummaryScreen>
 
     // 4) 이제 [0..1] 구간을 "24단계"로 쪼갭니다.
     //    stepCount=24 → 0~23 인덱스
-    const int stepCount = 24;
+    const int stepCount = 60;
     //  - 실수 t에 (stepCount-1)을 곱해 "몇 번째 인덱스인지"를 구하고, round()로 정수화
     final int index = (t * (stepCount - 1)).round();
     //  - 최종 스텝 인덱스를 다시 [0..(stepCount-1)] 범위로 제한

@@ -79,6 +79,7 @@ void main() async {
     // 1) mapScreenState 참조
     final mapState = mapScreenKey.currentState;
 
+
     // 2) “ignoreData” 결정
     bool ignore = false;
     if (mapState != null) {
@@ -90,6 +91,9 @@ void main() async {
         mapState.currentBgLocation = location;
       });
     }
+
+    // UI 갱신
+    mapState?.rebuildForLocation(location);
 
     // 3) locationManager onNewLocation
     //    → Outlier/EKF → MovementService → Hive

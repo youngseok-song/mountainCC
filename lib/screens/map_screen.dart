@@ -106,6 +106,12 @@ class MapScreenState extends State<MapScreen> {
     super.dispose();
   }
 
+  void rebuildForLocation(bg.Location loc) {
+    setState(() {
+      _currentBgLocation = loc;
+    });
+  }
+
   void _startCompass() {
     // flutter_compass의 이벤트 스트림 구독
     _compassSub = FlutterCompass.events!.listen((CompassEvent event) {
