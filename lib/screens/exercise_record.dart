@@ -5,6 +5,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import 'package:latlong2/latlong.dart' as latLng;  // Distance 계산용
+
 // Hive, GPX 관련 임포트
 import 'package:hive/hive.dart';
 import 'package:gpx/gpx.dart';
@@ -546,36 +548,85 @@ class _SummaryScreenState extends State<SummaryScreen>
 
   /// (새로 정의) HIVE 기록 탭 UI
   Widget _buildHiveListTab() {
-    // 1) locationBox 가져오기
-    //    - 주의: 이미 전역에서 Box<LocationData>를 열어서 사용 중이니,
-    //      여기서 다시 openBox()할 필요 없이 Hive.box() 로 바로 가져옵니다.
     final box = Hive.box<LocationData>('locationBox');
-
-    // 2) Box에서 모든 값 추출: toList()
     final locs = box.values.toList();
 
     if (locs.isEmpty) {
-      return const Center(
-        child: Text("저장된 위치데이터가 없습니다."),
-      );
+      return const Center(child: Text("저장된 위치데이터가 없습니다."));
     }
 
-    // 3) ListView.builder 로 표시
+    // (1) Distance 계산 객체 (latlong2) 준비
+    final distanceCalc = latLng.Distance();
+
+    // (2) 새 리스트를 만들어, 각 index별로 [위도/경도/고도/시간/이동거리/시간차/속도] 등 보관
+    //     예) List<RichLocation> 처럼 커스텀 클래스나, Map<String, dynamic> 사용 가능
+    final List<Map<String, dynamic>> displayItems = [];
+
+    // (3) locs를 순회하며, 이전 지점과 비교
+    //     첫 번째 지점(i=0)은 "이전 위치 없음"으로 보고 거리/속도 0 처리
+    LocationData? prev;
+    for (int i = 0; i < locs.length; i++) {
+      final current = locs[i];
+
+      double distMeter = 0.0;
+      double speedKmh = 0.0;
+      int dtSec = 0;
+
+      if (prev != null) {
+        // (a) 수평 거리 계산
+        distMeter = distanceCalc(
+          latLng.LatLng(prev.latitude, prev.longitude),
+          latLng.LatLng(current.latitude, current.longitude),
+        );
+        // (b) 시간차(초)
+        dtSec = current.timestamp.difference(prev.timestamp).inSeconds;
+
+        // (c) 속도(km/h) = (distMeter/1000) / (dtSec / 3600)
+        //                = distMeter * 3.6 / dtSec
+        if (dtSec > 0) {
+          speedKmh = (distMeter * 3.6) / dtSec;
+        }
+      }
+
+      // Map 등으로 담아두고, 나중에 ListView에서 사용
+      displayItems.add({
+        'lat': current.latitude,
+        'lon': current.longitude,
+        'alt': current.altitude,
+        'time': current.timestamp,
+        'distMeter': distMeter,
+        'dtSec': dtSec,
+        'speedKmh': speedKmh,
+      });
+
+      prev = current; // 다음 루프에서 비교할 "이전 위치"가 됨
+    }
+
+    // (4) 이제 displayItems를 ListView.builder로 표시
     return ListView.builder(
-      itemCount: locs.length,
+      itemCount: displayItems.length,
       itemBuilder: (context, index) {
-        final item = locs[index];
-        // item은 LocationData 객체
-        // -> latitude, longitude, altitude, timestamp 필드
+        final item = displayItems[index];
+        final lat = item['lat'] as double;
+        final lon = item['lon'] as double;
+        final alt = item['alt'] as double;
+        final time = item['time'] as DateTime;
+        final distMeter = item['distMeter'] as double;
+        final dtSec = item['dtSec'] as int;
+        final speedKmh = item['speedKmh'] as double;
+
         return ListTile(
           leading: const Icon(Icons.location_on),
           title: Text(
-            "Lat:${item.latitude.toStringAsFixed(6)}, "
-                "Lon:${item.longitude.toStringAsFixed(6)}",
+            "Lat: ${lat.toStringAsFixed(6)}, "
+                "Lon: ${lon.toStringAsFixed(6)}",
           ),
           subtitle: Text(
-            "고도: ${item.altitude.toStringAsFixed(1)} m / "
-                "시간: ${item.timestamp}",
+            "고도: ${alt.toStringAsFixed(1)} m\n"
+                "시간: $time\n"
+                "거리(이전점→현재점): ${distMeter.toStringAsFixed(1)} m\n"
+                "시간차: ${dtSec}s\n"
+                "속도: ${speedKmh.toStringAsFixed(2)} km/h",
           ),
         );
       },
