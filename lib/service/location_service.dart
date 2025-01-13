@@ -86,25 +86,26 @@ class LocationService {
     final currentLatLng = LatLng(location.coords.latitude, location.coords.longitude);
 
     if (lastSavedPosition == null) {
-      _saveToHive(currentLatLng, location.coords.altitude);
+      _saveToHive(currentLatLng, location.coords.altitude, location.coords.accuracy ?? 999.0);
       lastSavedPosition = currentLatLng;
       return;
     }
     // 6m마다 hive에 저장
     final distanceMeter = Distance().distance(lastSavedPosition!, currentLatLng);
     if (distanceMeter >= 6.0) {
-      _saveToHive(currentLatLng, location.coords.altitude);
+      _saveToHive(currentLatLng, location.coords.altitude, location.coords.accuracy ?? 999.0);
       lastSavedPosition = currentLatLng;
     }
   }
 
-  void _saveToHive(LatLng position, double altitude) {
+  void _saveToHive(LatLng position, double altitude, double accuracy) {
     locationBox.add(
       LocationData(
         latitude: position.latitude,
         longitude: position.longitude,
         altitude: altitude,
         timestamp: DateTime.now(),
+        accuracy: accuracy,
       ),
     );
   }

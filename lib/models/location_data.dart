@@ -21,10 +21,14 @@ class LocationData extends HiveObject {
   @HiveField(3)
   DateTime timestamp; // 기록 시간 정보
 
+  @HiveField(4)
+  double accuracy; // GPS 정확도 (meter 단위)
+
   LocationData({
     required this.latitude,
     required this.longitude,
     required this.altitude,
     required this.timestamp,
+    required this.accuracy,
   });
 }

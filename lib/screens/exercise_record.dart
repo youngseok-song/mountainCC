@@ -597,6 +597,7 @@ class _SummaryScreenState extends State<SummaryScreen>
         'distMeter': distMeter,
         'dtSec': dtSec,
         'speedKmh': speedKmh,
+        'accuracy': current.accuracy,
       });
 
       prev = current; // 다음 루프에서 비교할 "이전 위치"가 됨
@@ -625,6 +626,7 @@ class _SummaryScreenState extends State<SummaryScreen>
             "고도: ${alt.toStringAsFixed(1)} m\n"
                 "시간: $time\n"
                 "거리(이전점→현재점): ${distMeter.toStringAsFixed(1)} m\n"
+                "정확도: ±${(item['accuracy'] as double).toStringAsFixed(1)} m\n"
                 "시간차: ${dtSec}s\n"
                 "속도: ${speedKmh.toStringAsFixed(2)} km/h",
           ),
