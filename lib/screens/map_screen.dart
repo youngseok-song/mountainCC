@@ -264,6 +264,8 @@ class MapScreenState extends State<MapScreen> {
     setState(() {
       _isStartingWorkout = false;
     });
+
+    await _locationService.startBackgroundGeolocation();
   }
 
   // ------------------------------------------------------------
