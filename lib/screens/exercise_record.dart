@@ -87,7 +87,7 @@ class _SummaryScreenState extends State<SummaryScreen>
   void initState() {
     super.initState();
     // 탭 컨트롤러 초기화
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
 
     // 위치데이터 로딩, 폴리라인/차트 준비
     _loadDataAndBuildMap();
@@ -507,7 +507,7 @@ class _SummaryScreenState extends State<SummaryScreen>
 
     // *** AppBar 제거 + body에서 탭 구성 ***
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         body: Column(
           children: [
@@ -521,6 +521,7 @@ class _SummaryScreenState extends State<SummaryScreen>
                 tabs: const [
                   Tab(text: "운동 기록 요약"),
                   Tab(text: "운동 기록 상세"),
+                  Tab(text: "HIVE 기록"),
                 ],
               ),
             ),
@@ -532,12 +533,52 @@ class _SummaryScreenState extends State<SummaryScreen>
                 children: [
                   _buildRecordSummaryTab(),
                   _buildRecordDetailTab(),
+                  _buildHiveListTab(),
                 ],
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+
+  /// (새로 정의) HIVE 기록 탭 UI
+  Widget _buildHiveListTab() {
+    // 1) locationBox 가져오기
+    //    - 주의: 이미 전역에서 Box<LocationData>를 열어서 사용 중이니,
+    //      여기서 다시 openBox()할 필요 없이 Hive.box() 로 바로 가져옵니다.
+    final box = Hive.box<LocationData>('locationBox');
+
+    // 2) Box에서 모든 값 추출: toList()
+    final locs = box.values.toList();
+
+    if (locs.isEmpty) {
+      return const Center(
+        child: Text("저장된 위치데이터가 없습니다."),
+      );
+    }
+
+    // 3) ListView.builder 로 표시
+    return ListView.builder(
+      itemCount: locs.length,
+      itemBuilder: (context, index) {
+        final item = locs[index];
+        // item은 LocationData 객체
+        // -> latitude, longitude, altitude, timestamp 필드
+        return ListTile(
+          leading: const Icon(Icons.location_on),
+          title: Text(
+            "Lat:${item.latitude.toStringAsFixed(6)}, "
+                "Lon:${item.longitude.toStringAsFixed(6)}",
+          ),
+          subtitle: Text(
+            "고도: ${item.altitude.toStringAsFixed(1)} m / "
+                "시간: ${item.timestamp}",
+          ),
+        );
+      },
     );
   }
 
