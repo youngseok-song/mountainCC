@@ -6,6 +6,11 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'models/location_data.dart';
 import 'screens/webview_and_map_screen.dart'; // 새로 만든 화면 import
 
+import 'service/movement_service.dart';
+import 'service/location_service.dart';
+import 'service/location_manager.dart';
+import 'service/extended_kalman_filter.dart';
+
 // 1) 헤드리스 함수 정의
 @pragma('vm:entry-point')
 void backgroundGeolocationHeadlessTask(bg.HeadlessEvent headlessEvent) async {
@@ -53,6 +58,27 @@ void main() async {
 
   // 3) locationBox 오픈 (타입 명시: LocationData)
   await Hive.openBox<LocationData>('locationBox');
+
+  // 1) Service 객체 준비
+  final movementService = MovementService();
+  final locationBox = Hive.box<LocationData>('locationBox');
+  final locationService = LocationService(locationBox);
+
+  // 2) LocationManager 생성
+  final ekf = ExtendedKalmanFilter();
+
+  // (B) LocationManager 생성, ekf 주입
+  final locationManager = LocationManager(
+    movementService: movementService,
+    locationService: locationService,
+    ekf: ekf,  // 추가
+  );
+
+  // 3) BG onLocation -> locationManager
+  bg.BackgroundGeolocation.onLocation((bg.Location location) {
+    // "딱 한 번" outlier 검사 -> movementService & hive
+    locationManager.onNewLocation(location);
+  });
 
   // 2) 헤드리스 등록
   bg.BackgroundGeolocation.registerHeadlessTask(backgroundGeolocationHeadlessTask);

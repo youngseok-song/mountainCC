@@ -207,7 +207,7 @@ class MapScreenState extends State<MapScreen> {
     _startCompass();
 
     // (B) BackgroundGeolocation 시작 (콜백 등록)
-    await _locationService.startBackgroundGeolocation((bg.Location loc) {
+    bg.BackgroundGeolocation.onLocation((loc) {
       // 1) MovementService에 새 점 추가
       //_movementService.onNewLocation(loc, ignoreData: _ignoreDataFirst3s || _isPaused);
 

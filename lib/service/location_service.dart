@@ -25,7 +25,7 @@ class LocationService {
 
   /// ------------------------------------------------------------
   /// 백그라운드 위치 추적 시작
-  Future<void> startBackgroundGeolocation(Function(bg.Location) onPositionUpdate) async {
+  Future<void> startBackgroundGeolocation() async {
 
     // [NEW] 혹시 플러그인 자체가 이미 실행 중인지 확인.
     await syncStateFromPlugin();
@@ -35,12 +35,6 @@ class LocationService {
       return;
     }
     _isStarting = true;
-
-    // 위치 업데이트 콜백 등록
-    bg.BackgroundGeolocation.onLocation((bg.Location location) {
-      onPositionUpdate(location);
-      _maybeSavePosition(location);
-    });
 
     // (기타 onMotionChange, onProviderChange 등 생략)
 
@@ -82,7 +76,7 @@ class LocationService {
   }
 
   /// ------------------------------------------------------------
-  void _maybeSavePosition(bg.Location location) {
+  void maybeSavePosition(bg.Location location) {
     final currentLatLng = LatLng(location.coords.latitude, location.coords.longitude);
 
     if (lastSavedPosition == null) {
