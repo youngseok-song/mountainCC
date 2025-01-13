@@ -5,10 +5,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart'; // flutter_inappwebview 패키지 임포트
 import 'package:connectivity_plus/connectivity_plus.dart'; // 연결 상태 감지
 import 'map_screen.dart'; // 지도/운동 화면
+import '../service/movement_service.dart'; // MovementService
+import '../service/location_service.dart'; // LocationService
+import '../service/location_manager.dart'; // LocationManager
 import '../main.dart'; // 지도/운동 화면
 
 class WebViewAndMapScreen extends StatefulWidget {
-  const WebViewAndMapScreen({super.key});
+  final MovementService movementService;
+  final LocationService locationService;
+  final LocationManager locationManager;
+
+  const WebViewAndMapScreen({
+    super.key,
+    required this.movementService,
+    required this.locationService,
+    required this.locationManager,
+  });
 
   @override
   State<WebViewAndMapScreen> createState() => _WebViewAndMapScreenState();
@@ -77,7 +89,6 @@ class _WebViewAndMapScreenState extends State<WebViewAndMapScreen> {
                 javaScriptEnabled: true,
                 // 기타 cross-platform 옵션들
               ),
-
               // 첫 로딩할 URL
               initialUrlRequest: URLRequest(
                 url: WebUri('https://outify-git-main-jeongdxxns-projects.vercel.app/'),
@@ -115,10 +126,12 @@ class _WebViewAndMapScreenState extends State<WebViewAndMapScreen> {
               key: mapScreenKey, // <-- 반드시 추가(웹/앱 리로드)
               // MapScreen에서 "종료" 버튼 등을 누르면 다시 웹뷰로 돌아가기
               onStopWorkout: () {
-                setState(() {
-                  _showWebView = true;
-                });
+                setState(() => _showWebView = true);
               },
+              //MovementService, LocationService 주입
+              movementService: widget.movementService,
+              locationService: widget.locationService,
+
             ),
         ],
       ),

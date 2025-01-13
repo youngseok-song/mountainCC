@@ -71,44 +71,50 @@ void main() async {
   final locationManager = LocationManager(
     movementService: movementService,
     locationService: locationService,
-    ekf: ekf,  // 추가
+    ekf: ekf,
   );
 
-  // 3) BG onLocation -> locationManager
+  // (3) BG plugin onLocation 등록
   bg.BackgroundGeolocation.onLocation((bg.Location location) {
-    // 1) mapScreenState 참조
+    // 예시 로직
     final mapState = mapScreenKey.currentState;
-
-
-    // 2) “ignoreData” 결정
     bool ignore = false;
     if (mapState != null) {
-      // map_screen.dart 내 _ignoreDataFirst3s, _isPaused 접근하기 위한 getter
-      ignore = (mapState.ignoreDataFirst3s || mapState.isPaused);
-
-      // UI 갱신 (현재 위치)
+      ignore = mapState.ignoreDataFirst3s || mapState.isPaused;
       mapState.setState(() {
         mapState.currentBgLocation = location;
       });
     }
-
-    // UI 갱신
-    mapState?.rebuildForLocation(location);
-
-    // 3) locationManager onNewLocation
-    //    → Outlier/EKF → MovementService → Hive
+    // locationManager => Outlier + EKF + MovementService + Hive
     locationManager.onNewLocation(location, ignoreData: ignore);
-    print("onLocation => ${location.coords}, ignore=$ignore");
+
+    // 다시 한 번 setState()
+    mapScreenKey.currentState?.setState(() {});
   });
 
   // 2) 헤드리스 등록
   bg.BackgroundGeolocation.registerHeadlessTask(backgroundGeolocationHeadlessTask);
 
-  runApp(const MyApp());
+  runApp(
+    MyApp(
+      movementService: movementService,
+      locationService: locationService,
+      locationManager: locationManager,
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final MovementService movementService;
+  final LocationService locationService;
+  final LocationManager locationManager;
+
+  const MyApp({
+    Key? key,
+    required this.movementService,
+    required this.locationService,
+    required this.locationManager,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -119,7 +125,11 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
       debugShowCheckedModeBanner: false,
-      home: const WebViewAndMapScreen(),
+      home: WebViewAndMapScreen(
+        movementService: movementService,
+        locationService: locationService,
+        locationManager: locationManager,
+      ),
     );
   }
 }

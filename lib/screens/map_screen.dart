@@ -45,7 +45,15 @@ final List<LatLng> mainKoreaPolygon = [
 class MapScreen extends StatefulWidget {
   // onStopWorkout: 운동 종료 후 WebView 등 다른 화면으로 돌아갈 때 호출
   final VoidCallback? onStopWorkout;
-  const MapScreen({super.key, this.onStopWorkout});
+  final MovementService movementService;
+  final LocationService locationService;
+
+  const MapScreen({
+    super.key,
+    this.onStopWorkout,
+    required this.movementService,
+    required this.locationService,
+  });
 
   @override
   MapScreenState createState() => MapScreenState();
@@ -91,10 +99,8 @@ class MapScreenState extends State<MapScreen> {
 
     // Hive box (locationBox) 열기
     final locationBox = Hive.box<LocationData>('locationBox');
-    _locationService = LocationService(locationBox);
-
-    // MovementService 초기화
-    _movementService = MovementService();
+    _movementService = widget.movementService;
+    _locationService = widget.locationService;
 
   }
 
@@ -455,25 +461,20 @@ class MapScreenState extends State<MapScreen> {
                   ],
                 ),
               // 4) 현재 위치 + heading 방향
-              if (_currentBgLocation?.coords != null)
+              // EKF 데이터가 존재하면, Marker + Polyline를 한꺼번에 삽입
+              if (_movementService.polylinePoints.isNotEmpty) ...[
                 MarkerLayer(
                   markers: [
                     Marker(
-                      point: LatLng(
-                        _currentBgLocation!.coords.latitude,
-                        _currentBgLocation!.coords.longitude,
-                      ),
+                      point: _movementService.polylinePoints.last,
                       width: 40.0,
                       height: 40.0,
                       child: _buildGoogleStyleMarker(
-                        // headingRad: _compassHeading(도) → 라디안 변환
                         (_compassHeading ?? 0) * math.pi / 180,
                       ),
                     ),
                   ],
                 ),
-              // 5) 이동 경로(폴리라인)
-              if (_movementService.polylinePoints.isNotEmpty)
                 PolylineLayer(
                   polylines: [
                     Polyline(
@@ -483,8 +484,10 @@ class MapScreenState extends State<MapScreen> {
                     ),
                   ],
                 ),
-            ],
+              ],
+            ]
           ),
+
 
           // -------------------------------------------------
           // (B) 운동 전 => "운동 시작" 버튼
