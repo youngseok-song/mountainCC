@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart'; // flutter_inappwebview 패키지 임포트
 import 'package:connectivity_plus/connectivity_plus.dart'; // 연결 상태 감지
 import 'map_screen.dart'; // 지도/운동 화면
+import '../main.dart'; // 지도/운동 화면
 
 class WebViewAndMapScreen extends StatefulWidget {
   const WebViewAndMapScreen({super.key});
@@ -22,7 +23,7 @@ class _WebViewAndMapScreenState extends State<WebViewAndMapScreen> {
 
   // [C] 지도 MapScreen에 접근하기 위한 GlobalKey
   //     - 지도 타일 재로드를 위해 MapScreenState의 메서드를 호출할 수 있음
-  final GlobalKey<MapScreenState> _mapScreenKey = GlobalKey<MapScreenState>();
+  //final GlobalKey<MapScreenState> _mapScreenKey = GlobalKey<MapScreenState>();
 
   // [D] 연결 상태 감지용 Subscription
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
@@ -58,7 +59,7 @@ class _WebViewAndMapScreenState extends State<WebViewAndMapScreen> {
       _webViewController?.reload();
     } else {
       // 지도 화면이면 지도 타일 캐시 무효화 → 재요청
-      _mapScreenKey.currentState?.reloadMapTiles();
+      mapScreenKey.currentState?.reloadMapTiles();
     }
   }
 
@@ -111,7 +112,7 @@ class _WebViewAndMapScreenState extends State<WebViewAndMapScreen> {
           // - _showWebView = false 일 때만 표시
           if (!_showWebView)
             MapScreen(
-              key: _mapScreenKey, // <-- 반드시 추가(웹/앱 리로드)
+              key: mapScreenKey, // <-- 반드시 추가(웹/앱 리로드)
               // MapScreen에서 "종료" 버튼 등을 누르면 다시 웹뷰로 돌아가기
               onStopWorkout: () {
                 setState(() {

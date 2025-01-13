@@ -1,5 +1,4 @@
 //main.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_background_geolocation/flutter_background_geolocation.dart' as bg;
 import 'package:hive_flutter/hive_flutter.dart';
@@ -10,6 +9,7 @@ import 'service/movement_service.dart';
 import 'service/location_service.dart';
 import 'service/location_manager.dart';
 import 'service/extended_kalman_filter.dart';
+import 'screens/map_screen.dart';
 
 // 1) 헤드리스 함수 정의
 @pragma('vm:entry-point')
@@ -46,7 +46,7 @@ void backgroundGeolocationHeadlessTask(bg.HeadlessEvent headlessEvent) async {
   // ...
   }
 }
-
+final GlobalKey<MapScreenState> mapScreenKey = GlobalKey<MapScreenState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -76,8 +76,24 @@ void main() async {
 
   // 3) BG onLocation -> locationManager
   bg.BackgroundGeolocation.onLocation((bg.Location location) {
-    // "딱 한 번" outlier 검사 -> movementService & hive
-    locationManager.onNewLocation(location);
+    // 1) mapScreenState 참조
+    final mapState = mapScreenKey.currentState;
+
+    // 2) “ignoreData” 결정
+    bool ignore = false;
+    if (mapState != null) {
+      // map_screen.dart 내 _ignoreDataFirst3s, _isPaused 접근하기 위한 getter
+      ignore = (mapState.ignoreDataFirst3s || mapState.isPaused);
+
+      // UI 갱신 (현재 위치)
+      mapState.setState(() {
+        mapState.currentBgLocation = location;
+      });
+    }
+
+    // 3) locationManager onNewLocation
+    //    → Outlier/EKF → MovementService → Hive
+    locationManager.onNewLocation(location, ignoreData: ignore);
   });
 
   // 2) 헤드리스 등록

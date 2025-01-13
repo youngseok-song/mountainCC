@@ -69,6 +69,13 @@ class MapScreenState extends State<MapScreen> {
   bool _isPaused = false;           // 일시중지 상태
   String _elapsedTime = "00:00:00"; // 스톱워치 UI용
 
+  bool get ignoreDataFirst3s => _ignoreDataFirst3s;
+  bool get isPaused => _isPaused;
+
+  set currentBgLocation(bg.Location? loc) {
+    _currentBgLocation = loc;
+  }
+
   // -----------------------------------------
   // (추가) compass 사용
   // -----------------------------------------
@@ -205,25 +212,6 @@ class MapScreenState extends State<MapScreen> {
 
     // *** Compass 시작 추가 ***
     _startCompass();
-
-    // (B) BackgroundGeolocation 시작 (콜백 등록)
-    bg.BackgroundGeolocation.onLocation((loc) {
-      // 1) MovementService에 새 점 추가
-      //_movementService.onNewLocation(loc, ignoreData: _ignoreDataFirst3s || _isPaused);
-
-      _movementService.onNewLocation(
-        loc,
-        ignoreData: _ignoreDataFirst3s || _isPaused,
-      );
-
-      // 2) setState()로 UI 재빌드
-      setState(() {
-        _currentBgLocation = loc;
-        // 여기서 _movementService.polylinePoints에 변화가 생겼으므로,
-        // build()에서 PolylineLayer가 다시 그려짐
-      });
-
-    });
 
     // (C) 첫 위치를 즉시 가져오기 (getCurrentPosition)
     final currentLoc = await bg.BackgroundGeolocation.getCurrentPosition(

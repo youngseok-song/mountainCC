@@ -22,7 +22,7 @@ class LocationManager {
   });
 
   /// BG plugin이 location을 콜백으로 받을 때 호출할 메서드
-  void onNewLocation(bg.Location loc) {
+  void onNewLocation(bg.Location loc, {bool ignoreData=false}) {
     // (1) Outlier 검사
     if (movementService.isOutlier(loc)) {
       return;
