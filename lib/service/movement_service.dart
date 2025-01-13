@@ -253,6 +253,8 @@ class MovementService {
   /// BG plugin의 onLocation()에서 호출
   ///  - ignoreData: 특정 상황(카운트다운) 등에서 데이터를 무시할 때
   void onNewLocation(bg.Location loc, {bool ignoreData = false}) {
+    print("MovementService: loc=(${loc.coords.latitude},${loc.coords.longitude})");
+    print("_polylinePoints len= ${_polylinePoints.length}");
     // 필요 시 특정 조건에 따라 무시
     if (ignoreData) return;
 

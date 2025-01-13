@@ -94,6 +94,7 @@ void main() async {
     // 3) locationManager onNewLocation
     //    → Outlier/EKF → MovementService → Hive
     locationManager.onNewLocation(location, ignoreData: ignore);
+    print("onLocation => ${location.coords}, ignore=$ignore");
   });
 
   // 2) 헤드리스 등록
