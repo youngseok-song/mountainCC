@@ -275,7 +275,7 @@ class MovementService {
     // (E) 고도 계산 (기존 SensorFusion + Baro)
     final gpsAlt = loc.coords.altitude;
     final fusedAlt = _fusion.getFusedAltitude() ?? gpsAlt;
-    _updateCumulativeElevation(fusedAlt);
+
 
     // Baro offset 주기적 보정
     final nowMs = DateTime.now().millisecondsSinceEpoch;
@@ -318,15 +318,17 @@ class MovementService {
 
     final newAlt = lastData.altitude;
 
-    // == (A) 누적 거리 ==
+    // =========================================================================
+    //  누적거리
+    // =========================================================================
     if (_prevHiveLatLng != null) {
       final distMeter = Distance().distance(_prevHiveLatLng!, newHiveLatLng);
       _distanceFromHiveKm += (distMeter / 1000.0);
     }
 
-    // == (B) 누적 고도 ==
-    // 기존 _updateCumulativeElevation와 유사하나,
-    //   "Hive로 저장된 점들" 사이의 diff만 반영
+    // =========================================================================
+    //  누적 고도 계산
+    // =========================================================================
     if (_prevHiveAltitude == null) {
       _prevHiveAltitude = newAlt;
     } else {
@@ -421,24 +423,6 @@ class MovementService {
     }
   }
 
-  // =========================================================================
-  // 8) 누적 고도 계산
-  // =========================================================================
-  /// 현재 고도(currentAlt) - baseAltitude > 3.0m 이면 누적고도에 추가
-  void _updateCumulativeElevation(double currentAlt) {
-    if (_baseAltitude == null) {
-      _baseAltitude = currentAlt;
-      return;
-    }
-    final diff = currentAlt - _baseAltitude!;
-    if (diff > 5.0) {
-      _cumulativeElevationHive += diff;
-      _baseAltitude = currentAlt;
-    } else if (diff < -5.0) {
-      _baseAltitude = currentAlt;
-      _cumulativeDescentHive += (-diff);    // 또는 diff.abs()
-    }
-  }
 
   // =========================================================================
   // 9) 초기 오프셋 보정(캘리브레이션)
