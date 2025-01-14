@@ -427,52 +427,62 @@ class _SummaryScreenState extends State<SummaryScreen>
   }
 
   Color _getSpeedColor(double speedKmh, double avgSpeedKmh) {
-    // 1) 먼저 speedKmh/avgSpeedKmh로 ratio를 구합니다.
-    final ratio = speedKmh / avgSpeedKmh;
+    // 1) 속도 비율 ratio = (speed / avgSpeed)
+    double ratio = speedKmh / avgSpeedKmh;
 
-    // 2) 우리가 원하는 구간은 [0.2, 2.5].
-    //    ratio가 0.2 미만이면 0.2로, 2.5 초과이면 2.5로 '클램프'합니다.
-    const double start = 0.2;
-    const double end   = 2.5;
+    // 2) 우리가 원하는 범위 [0.3 ~ 2.6] 으로 clamp
+    //    => 0.3 이하는 0.3, 2.6 이상은 2.6
+    const double minRatio = 0.3;
+    const double maxRatio = 2.6;
+    if (ratio < minRatio) ratio = minRatio;
+    if (ratio > maxRatio) ratio = maxRatio;
 
-    // (a) 실제 유효 범위 내로 보정
-    double clampedRatio;
-    if (ratio < start) {
-      clampedRatio = start;
-    } else if (ratio > end) {
-      clampedRatio = end;
-    } else {
-      clampedRatio = ratio;
-    }
+    // 3) 0.3 ~ 2.6 (폭 2.3) 구간을 0..1 로 환산
+    double t = (ratio - minRatio) / (maxRatio - minRatio); // => [0..1]
 
-    // 3) 보정된 clampedRatio를 [0, 1] 구간으로 환산
-    //    예: ratio=0.2 => t=0, ratio=2.5 => t=1
-    final double t = (clampedRatio - start) / (end - start);
+    // 4) 24단계 => 인덱스 0..23
+    const int stepCount = 24;
+    int index = (t * (stepCount - 1)).round();
+    // clamp
+    if (index < 0) index = 0;
+    if (index >= stepCount) index = stepCount - 1;
 
-    // 4) 이제 [0..1] 구간을 "24단계"로 쪼갭니다.
-    //    stepCount=24 → 0~23 인덱스
-    const int stepCount = 60;
-    //  - 실수 t에 (stepCount-1)을 곱해 "몇 번째 인덱스인지"를 구하고, round()로 정수화
-    final int index = (t * (stepCount - 1)).round();
-    //  - 최종 스텝 인덱스를 다시 [0..(stepCount-1)] 범위로 제한
-    //    (round() 때문에 범위를 초과할 일은 드물지만 안전책)
-    final int clampedIndex = index.clamp(0, stepCount - 1);
+    // 5) "직접 매핑"할 24가지 색상 배열
+    //    아래는 예시로 빨강→주황→노랑→연두→초록→파랑→보라 까지
+    //    단계적으로 분포한 24개 RGBA 값입니다.
+    //    (원하시는 색상으로 자유롭게 조정 가능)
+    const List<Color> rainbow24 = [
+      Color(0xFFff0000), // 0  빨강
+      Color(0xFFff4500), // 1  약간 주황
+      Color(0xFFff6347), // 2  더 주황
+      Color(0xFFff6347), // 3  주황/노랑 사이
+      Color(0xFFff8c00), // 4  노랑
+      Color(0xFFffa500), // 5  노랑-연두 사이
+      Color(0xFFb8860b), // 6
+      Color(0xFFdaa520), // 7
+      Color(0xFFffd700), // 8  연두
+      Color(0xFFffff00), // 9
+      Color(0xFF9acd32), // 10 초록
+      Color(0xFF00FF55), // 11
+      Color(0xFF00FFAA), // 12 민트
+      Color(0xFF00FFEF), // 13 에메랄드/하늘 사이
+      Color(0xFF00EFFF), // 14 하늘
+      Color(0xFF00Aaff), // 15 하늘/파랑 사이
+      Color(0xFF006EFF), // 16
+      Color(0xFF0033FF), // 17 짙은 파랑
+      Color(0xFF3300FF), // 18 보라 기운
+      Color(0xFF6600FF), // 19
+      Color(0xFF7F00FF), // 20 보라
+      Color(0xFFAA00FF), // 21
+      Color(0xFFD400FF), // 22
+      Color(0xFFFF00FF), // 23 자홍(핑크-보라)
+    ];
 
-    // 5) clampedIndex를 0 ~ (stepCount-1)로 나누어 "단계별 보간값(0~1)"로 변환
-    final double stepValue = clampedIndex / (stepCount - 1);
-
-    // 6) 빨강(0xFFFF0000)~파랑(0xFF0000FF)을 lerpColor로 보간
-    //    stepValue=0 → 빨강, stepValue=1 → 파랑
-    //    그 사이 값은 24단계 중 하나
-    final Color? color = Color.lerp(
-      const Color(0xFFFF0000), // 빨강
-      const Color(0xFF0000FF), // 파랑
-      stepValue,
-    );
-
-    // 7) null safety → non-null 단언
-    return color ?? const Color(0xFFFF0000);
+    // 6) 최종 인덱스에 해당하는 색 리턴
+    return rainbow24[index];
   }
+
+
 
   void _fitMapToBounds() {
     if (!_mapReady) return;
