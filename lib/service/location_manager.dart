@@ -20,11 +20,20 @@ class LocationManager {
 
   /// BG plugin이 location을 콜백으로 받을 때 호출할 메서드
   void onNewLocation(bg.Location loc, {bool ignoreData = false}) {
-    // (A) MovementService에 그대로 넘김 (Outlier/EKF 등은 MovementService가 담당)
-    movementService.onNewLocation(loc, ignoreData: ignoreData);
+    // (1) MovementService 호출 → (ekfLatLng, fusedAlt, acc) 반환
+    final (ekfLatLng, fusedAlt, acc) = movementService.onNewLocation(loc, ignoreData: ignoreData);
 
-    // (4) Hive 저장
-    locationService.maybeSavePosition(loc);
+    // (2) 만약 null이면 (Outlier, ignoreData) → 그냥 return
+    if (ekfLatLng == null) {
+      return;
+    }
+
+    // (3) Hive 저장 → EKF 값 사용
+    locationService.maybeSavePosition(
+      ekfLatLng,
+      fusedAlt!,  // non-null 단언
+      acc!,       // non-null 단언
+    );
   }
 }
 

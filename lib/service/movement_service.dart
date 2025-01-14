@@ -255,13 +255,13 @@ class MovementService {
 
   /// BG plugin의 onLocation()에서 호출
   ///  - ignoreData: 특정 상황(카운트다운) 등에서 데이터를 무시할 때
-  void onNewLocation(bg.Location loc, {bool ignoreData = false}) {
-    // 필요 시 특정 조건에 따라 무시
-    if (ignoreData) return;
+  (LatLng?, double?, double?) onNewLocation(bg.Location loc, {bool ignoreData = false}) {
+    if (ignoreData) return (null, null, null);
 
     // (A) Outlier 검사
+    // (A) Outlier 검사
     if (isOutlier(loc)) {
-      return;
+      return (null, null, null); // 이상치면 저장 안 함
     }
 
     // (B) EKF Predict (dt 계산)
@@ -282,6 +282,7 @@ class MovementService {
     // (E) 고도 계산 (기존 SensorFusion + Baro)
     final gpsAlt = loc.coords.altitude;
     final fusedAlt = _fusion.getFusedAltitude() ?? gpsAlt;
+
     _updateCumulativeElevation(fusedAlt);
     // Baro offset 주기적 보정
     final nowMs = DateTime.now().millisecondsSinceEpoch;
@@ -290,10 +291,15 @@ class MovementService {
       _lastOffsetUpdateTime = nowMs;
     }
 
+    final double acc = loc.coords.accuracy ?? 999.0;
+
     // (F) Outlier 판단용 기록(고도 기준)
     _lastAltitude = gpsAlt;
     _lastTimestampMs = _parseTimestamp(loc.timestamp)
         ?? DateTime.now().millisecondsSinceEpoch;
+
+    // 반환 (ekf lat/lon, fused altitude, accuracy)
+    return (LatLng(ekfLat, ekfLon), fusedAlt, acc);
   }
 
   // -------------------------------------------------------------------

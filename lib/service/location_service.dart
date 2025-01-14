@@ -75,31 +75,30 @@ class LocationService {
     _isTracking = false;
   }
 
-  /// ------------------------------------------------------------
-  void maybeSavePosition(bg.Location location) {
-    final currentLatLng = LatLng(location.coords.latitude, location.coords.longitude);
-
+  /// 칼만필터 lat/lon, altitude(융합 or raw), accuracy
+  void maybeSavePosition(LatLng ekfLatLng, double altitude, double accuracy) {
+    // distance 계산: lastSavedPosition vs. ekfLatLng
     if (lastSavedPosition == null) {
-      _saveToHive(currentLatLng, location.coords.altitude, location.coords.accuracy ?? 999.0);
-      lastSavedPosition = currentLatLng;
+      _saveToHive(ekfLatLng, altitude, accuracy);
+      lastSavedPosition = ekfLatLng;
       return;
     }
-    // 6m마다 hive에 저장
-    final distanceMeter = Distance().distance(lastSavedPosition!, currentLatLng);
+
+    final distanceMeter = Distance().distance(lastSavedPosition!, ekfLatLng);
     if (distanceMeter >= 6.0) {
-      _saveToHive(currentLatLng, location.coords.altitude, location.coords.accuracy ?? 999.0);
-      lastSavedPosition = currentLatLng;
+      _saveToHive(ekfLatLng, altitude, accuracy);
+      lastSavedPosition = ekfLatLng;
     }
   }
 
-  void _saveToHive(LatLng position, double altitude, double accuracy) {
+  void _saveToHive(LatLng pos, double alt, double acc) {
     locationBox.add(
       LocationData(
-        latitude: position.latitude,
-        longitude: position.longitude,
-        altitude: altitude,
-        timestamp: DateTime.now(),
-        accuracy: accuracy,
+        latitude: pos.latitude,   // ← EKF lat
+        longitude: pos.longitude, // ← EKF lon
+        altitude: alt,            // ← fusedAlt (or raw alt)
+        timestamp: DateTime.now(),     // ← 저장 시각
+        accuracy: acc,            // ← raw gps accuracy
       ),
     );
   }
