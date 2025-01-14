@@ -17,6 +17,7 @@ import 'package:sensors_plus/sensors_plus.dart'; // Barometer, Gyro
 import '../models/sensor_fusion.dart'; // SensorFusion 객체 (Dead Reckoning, Baro/GPS 혼합)
 // (A) EKF 임포트
 import 'extended_kalman_filter.dart';
+import 'location_service.dart'; // ← Hive 쓰려면 필요
 
 
 // MovementService 클래스
@@ -24,12 +25,12 @@ class MovementService {
   // [1] EKF 인스턴스 추가
   // EKF를 '외부'에서 주입받아 사용
   final ExtendedKalmanFilter ekf;
+  final LocationService _locationService;
 
   MovementService({
     required this.ekf,
-    // 필요하면 다른 파라미터(Stopwatch, etc.)도 주입 가능
-  });
-
+    required LocationService locationService,
+  }) : _locationService = locationService;
 
   // ---------------------------------------------------
   // (A) 폴리라인, 스톱워치, 누적고도 등 '운동' 관련 필드
@@ -64,12 +65,17 @@ class MovementService {
     return "$hh:$mm:$ss";
   }
 
-  /// 누적 고도 (상승고도)
-  double _cumulativeElevation = 0.0;
-  double get cumulativeElevation => _cumulativeElevation;
-  /// 누적 고도 (하강고도)
-  double _cumulativeDescent = 0.0;
-  double get cumulativeDescent => _cumulativeDescent;
+  // ---------------------------------------------------
+  // (B) Hive 기반 거리·고도 누적을 위한 필드 (신규 추가)
+  // ---------------------------------------------------
+  double _distanceFromHiveKm = 0.0; // 누적 거리 (Hive)
+  double get distanceKm => _distanceFromHiveKm;
+
+  double _cumulativeElevationHive = 0.0; // 누적 상승고도 (Hive)
+  double get cumulativeElevation => _cumulativeElevationHive;
+
+  double _cumulativeDescentHive = 0.0;   // 누적 하강고도 (Hive)
+  double get cumulativeDescent => _cumulativeDescentHive;
 
   /// 누적 고도를 계산할 때 기준점이 될 고도
   double? _baseAltitude;
@@ -194,28 +200,15 @@ class MovementService {
     _lastGyroTimestamp = null;
   }
 
-  // =========================================================================
-  // 3) 거리/속도 계산 (폴리라인 기반)
-  // =========================================================================
-
-  /// 누적 이동 거리(km)
-  ///  - _polylinePoints를 순회하면서, 두 지점 간 거리들을 합산
-  double get distanceKm {
-    double total = 0.0;
-    for (int i = 1; i < _polylinePoints.length; i++) {
-      total += Distance().distance(
-        _polylinePoints[i - 1],
-        _polylinePoints[i],
-      );
-    }
-    return total / 1000.0;
-  }
+  // Hive에 저장된 “이전 점”을 추적하기 위해...
+  LatLng? _prevHiveLatLng;
+  double? _prevHiveAltitude;
 
   /// 평균 속도(km/h)
   ///  - 거리(km) / 시간(시간단위)
   double get averageSpeedKmh {
     if (_exerciseStopwatch.elapsed.inSeconds == 0) return 0.0;
-    final km = distanceKm;
+    final km = distanceKm; // <-- 여기서 distanceKm는 _distanceFromHiveKm
     final hours = _exerciseStopwatch.elapsed.inSeconds / 3600.0;
     return km / hours;
   }
@@ -282,8 +275,8 @@ class MovementService {
     // (E) 고도 계산 (기존 SensorFusion + Baro)
     final gpsAlt = loc.coords.altitude;
     final fusedAlt = _fusion.getFusedAltitude() ?? gpsAlt;
-
     _updateCumulativeElevation(fusedAlt);
+
     // Baro offset 주기적 보정
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     if (nowMs - _lastOffsetUpdateTime > _offsetUpdateInterval) {
@@ -291,15 +284,65 @@ class MovementService {
       _lastOffsetUpdateTime = nowMs;
     }
 
-    final double acc = loc.coords.accuracy ?? 999.0;
-
     // (F) Outlier 판단용 기록(고도 기준)
     _lastAltitude = gpsAlt;
     _lastTimestampMs = _parseTimestamp(loc.timestamp)
         ?? DateTime.now().millisecondsSinceEpoch;
 
+    // (D) Hive에 6m마다 저장
+    final acc = loc.coords.accuracy ?? 999.0;
+    _locationService.maybeSavePosition(LatLng(ekfLat, ekfLon), fusedAlt, acc);
+
+    // (E) [추가] "혹시 새로 Hive에 저장됐으면, 거리/고도 누적 업데이트"
+    _updateStatsFromHive();
+
     // 반환 (ekf lat/lon, fused altitude, accuracy)
     return (LatLng(ekfLat, ekfLon), fusedAlt, acc);
+  }
+
+
+  void _updateStatsFromHive() {
+    // 1) LocationService에서 현재 "마지막으로 저장된" 위치를 가져옴.
+    final newHiveLatLng = _locationService.lastSavedPosition;
+    if (newHiveLatLng == null) return; // 아직 저장된게 없다면 pass
+
+    // 2) 만약 이전 _prevHiveLatLng와 동일하면, "새로 추가된"게 아님 → pass
+    if (_prevHiveLatLng == newHiveLatLng) {
+      return;
+    }
+
+    // 3) LocationService.locationBox.values.last => 새로 추가된 Hive 레코드
+    final box = _locationService.locationBox;
+    if (box.isEmpty) return;
+    final lastData = box.values.last; // 방금 추가된 data
+
+    final newAlt = lastData.altitude;
+
+    // == (A) 누적 거리 ==
+    if (_prevHiveLatLng != null) {
+      final distMeter = Distance().distance(_prevHiveLatLng!, newHiveLatLng);
+      _distanceFromHiveKm += (distMeter / 1000.0);
+    }
+
+    // == (B) 누적 고도 ==
+    // 기존 _updateCumulativeElevation와 유사하나,
+    //   "Hive로 저장된 점들" 사이의 diff만 반영
+    if (_prevHiveAltitude == null) {
+      _prevHiveAltitude = newAlt;
+    } else {
+      final diff = newAlt - _prevHiveAltitude!;
+      if (diff > 5.0) {
+        _cumulativeElevationHive += diff;
+        _prevHiveAltitude = newAlt;
+      } else if (diff < -5.0) {
+        _cumulativeDescentHive += (-diff);
+        _prevHiveAltitude = newAlt;
+      }
+    }
+
+    // 4) 마지막 좌표/고도 갱신
+    _prevHiveLatLng   = newHiveLatLng;
+    _prevHiveAltitude = newAlt;
   }
 
   // -------------------------------------------------------------------
@@ -389,11 +432,11 @@ class MovementService {
     }
     final diff = currentAlt - _baseAltitude!;
     if (diff > 5.0) {
-      _cumulativeElevation += diff;
+      _cumulativeElevationHive += diff;
       _baseAltitude = currentAlt;
     } else if (diff < -5.0) {
       _baseAltitude = currentAlt;
-      _cumulativeDescent += (-diff);    // 또는 diff.abs()
+      _cumulativeDescentHive += (-diff);    // 또는 diff.abs()
     }
   }
 
@@ -428,7 +471,9 @@ class MovementService {
 
     // 폴리라인, 누적고도, 스톱워치 등 초기화
     _polylinePoints.clear();
-    _cumulativeElevation = 0.0;
+    _distanceFromHiveKm = 0.0;
+    _cumulativeElevationHive = 0.0;
+    _cumulativeDescentHive = 0.0;
     _baseAltitude = null;
     pauseStopwatch();
     resetStopwatch();

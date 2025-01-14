@@ -76,18 +76,17 @@ class LocationService {
   }
 
   /// 칼만필터 lat/lon, altitude(융합 or raw), accuracy
-  void maybeSavePosition(LatLng ekfLatLng, double altitude, double accuracy) {
-    // distance 계산: lastSavedPosition vs. ekfLatLng
+  void maybeSavePosition(LatLng pos, double alt, double acc) {
     if (lastSavedPosition == null) {
-      _saveToHive(ekfLatLng, altitude, accuracy);
-      lastSavedPosition = ekfLatLng;
+      _saveToHive(pos, alt, acc);
+      lastSavedPosition = pos;
       return;
     }
 
-    final distanceMeter = Distance().distance(lastSavedPosition!, ekfLatLng);
-    if (distanceMeter >= 6.0) {
-      _saveToHive(ekfLatLng, altitude, accuracy);
-      lastSavedPosition = ekfLatLng;
+    final dist = Distance().distance(lastSavedPosition!, pos);
+    if (dist >= 6.0) {
+      _saveToHive(pos, alt, acc);
+      lastSavedPosition = pos;
     }
   }
 
@@ -98,7 +97,7 @@ class LocationService {
         longitude: pos.longitude, // ← EKF lon
         altitude: alt,            // ← fusedAlt (or raw alt)
         timestamp: DateTime.now(),     // ← 저장 시각
-        accuracy: acc,            // ← raw gps accuracy
+        accuracy: acc,            // ← EKF 추정치 or raw gps accuracy
       ),
     );
   }

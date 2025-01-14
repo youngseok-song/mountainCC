@@ -61,11 +61,14 @@ void main() async {
 
   // 1) EKF 준비
   final ekf = ExtendedKalmanFilter();
-
-  // 2) 객체 준비
-  final movementService = MovementService(ekf: ekf);
   final locationBox = Hive.box<LocationData>('locationBox');
   final locationService = LocationService(locationBox);
+
+  // 2) 객체 준비
+  final movementService = MovementService(
+    ekf: ekf,
+    locationService: locationService, // 이 부분 꼭 추가
+  );
 
   // (B) LocationManager 생성, ekf 주입
   final locationManager = LocationManager(
@@ -107,6 +110,8 @@ class MyApp extends StatelessWidget {
   final MovementService movementService;
   final LocationService locationService;
   final LocationManager locationManager;
+
+
 
   const MyApp({
     Key? key,
