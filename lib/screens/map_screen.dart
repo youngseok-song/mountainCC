@@ -261,7 +261,7 @@ class MapScreenState extends State<MapScreen> {
     });
 
     // 3초 뒤 -> ignoreDataFirst3s=false
-    Future.delayed(const Duration(seconds: 5), () {
+    Future.delayed(const Duration(seconds: 10), () {
       if (!mounted) return;
       setState(() {
         _ignoreDataFirst3s = false;

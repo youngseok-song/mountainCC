@@ -21,11 +21,14 @@ import 'extended_kalman_filter.dart';
 
 // MovementService 클래스
 class MovementService {
-
   // [1] EKF 인스턴스 추가
-  final ExtendedKalmanFilter _ekf = ExtendedKalmanFilter();
-  // (필요하면) EKF 시간 계산용 타임스탬프
-  int? _lastEkfTimestampMs;
+  // EKF를 '외부'에서 주입받아 사용
+  final ExtendedKalmanFilter ekf;
+
+  MovementService({
+    required this.ekf,
+    // 필요하면 다른 파라미터(Stopwatch, etc.)도 주입 가능
+  });
 
 
   // ---------------------------------------------------
@@ -263,26 +266,17 @@ class MovementService {
 
     // (B) EKF Predict (dt 계산)
     double dt = _computeDeltaTime(loc);
-    _ekf.predict(dt);
+    ekf.predict(dt);
 
-    // (C) EKF UpdateGPS
-    //     lat->y, lon->x (단순 scale) or ENU 변환
-    double lat = loc.coords.latitude;
-    double lon = loc.coords.longitude;
-    const double scale = 111000.0; // 약 1도 -> 111km
+    // scale 변환 후 ekf.updateGPS(gpsX, gpsY);
+    final double scale = 111000.0;
+    double gpsX = loc.coords.longitude * scale;
+    double gpsY = loc.coords.latitude * scale;
+    ekf.updateGPS(gpsX, gpsY);
 
-    double gpsX = lon * scale;
-    double gpsY = lat * scale;
-    _ekf.updateGPS(gpsX, gpsY);
-
-    // (D) EKF 결과( x,y )를 활용할지, RAW GPS를 그대로 쓸지 결정
-    //     예: 폴리라인을 EKF 기반으로 그리고 싶다면:
-    double ekfX = _ekf.x;
-    double ekfY = _ekf.y;
-    double ekfLat = ekfY / scale;
-    double ekfLon = ekfX / scale;
-
-    // 대신 "raw gps" 경로가 아닌 "보정된 ekf" 경로를 저장해볼 수 있음
+    // (4) 결과(ekf.x, ekf.y)를 사용해 폴리라인 추가, 고도 계산 등
+    double ekfLat = ekf.y / scale;
+    double ekfLon = ekf.x / scale;
     _polylinePoints.add(LatLng(ekfLat, ekfLon));
 
     // (E) 고도 계산 (기존 SensorFusion + Baro)
@@ -305,6 +299,7 @@ class MovementService {
   // -------------------------------------------------------------------
   // dt(초) 계산 → EKF predict에 사용
   // -------------------------------------------------------------------
+  int? _lastEkfTimestampMs;
   double _computeDeltaTime(bg.Location loc) {
     int nowMs = _parseTimestamp(loc.timestamp)
         ?? DateTime.now().millisecondsSinceEpoch;
@@ -313,8 +308,9 @@ class MovementService {
       return 1.0; // 첫 dt=1초 가정
     }
     double dtSec = (nowMs - _lastEkfTimestampMs!) / 1000.0;
-    if (dtSec < 0) dtSec = 0.01; // 역행 방어
     _lastEkfTimestampMs = nowMs;
+    // 방어코드
+    if (dtSec < 0) dtSec = 0.01;
     return dtSec;
   }
 

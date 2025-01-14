@@ -59,19 +59,18 @@ void main() async {
   // 3) locationBox 오픈 (타입 명시: LocationData)
   await Hive.openBox<LocationData>('locationBox');
 
-  // 1) Service 객체 준비
-  final movementService = MovementService();
+  // 1) EKF 준비
+  final ekf = ExtendedKalmanFilter();
+
+  // 2) 객체 준비
+  final movementService = MovementService(ekf: ekf);
   final locationBox = Hive.box<LocationData>('locationBox');
   final locationService = LocationService(locationBox);
-
-  // 2) LocationManager 생성
-  final ekf = ExtendedKalmanFilter();
 
   // (B) LocationManager 생성, ekf 주입
   final locationManager = LocationManager(
     movementService: movementService,
     locationService: locationService,
-    ekf: ekf,
   );
 
   // (3) BG plugin onLocation 등록
@@ -87,9 +86,6 @@ void main() async {
     }
     // locationManager => Outlier + EKF + MovementService + Hive
     locationManager.onNewLocation(location, ignoreData: ignore);
-
-    // 다시 한 번 setState()
-    mapScreenKey.currentState?.setState(() {});
   });
 
   // 2) 헤드리스 등록
