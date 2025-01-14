@@ -77,6 +77,8 @@ class MovementService {
   double _cumulativeDescentHive = 0.0;   // 누적 하강고도 (Hive)
   double get cumulativeDescent => _cumulativeDescentHive;
 
+  bool _ekfInitialized = false;  // "EKF가 이미 초기화 되었는지" 여부 플래그
+
   /// 누적 고도를 계산할 때 기준점이 될 고도
   double? _baseAltitude;
 
@@ -257,15 +259,29 @@ class MovementService {
       return (null, null, null); // 이상치면 저장 안 함
     }
 
-    // (B) EKF Predict (dt 계산)
-    double dt = _computeDeltaTime(loc);
-    ekf.predict(dt);
-
     // scale 변환 후 ekf.updateGPS(gpsX, gpsY);
     final double scale = 111000.0;
     double gpsX = loc.coords.longitude * scale;
     double gpsY = loc.coords.latitude * scale;
     ekf.updateGPS(gpsX, gpsY);
+
+    final acc = loc.coords.accuracy ?? 999.0;
+    // 2) 만약 아직 EKF 초기화가 안 됐다면 → 여기가 첫 위치 콜백일 수 있음
+    if (!_ekfInitialized) {
+      // 아직 초기화 안 됐으면, 정확도 검사
+      if (acc < 50.0) {
+        ekf.initWithGPS(gpsX, gpsY);
+        _ekfInitialized = true;
+        return (null, null, null);
+      } else {
+        // accuracy가 너무 커서 아직 초기화 못 함 → 그냥 return
+        return (null, null, null);
+      }
+    } else {
+      // EKF가 이미 초기화됐으면 → predict / updateGPS
+      double dt = _computeDeltaTime(loc);
+      ekf.predict(dt);
+    }
 
     // (4) 결과(ekf.x, ekf.y)를 사용해 폴리라인 추가, 고도 계산 등
     double ekfLat = ekf.y / scale;
@@ -290,7 +306,6 @@ class MovementService {
         ?? DateTime.now().millisecondsSinceEpoch;
 
     // (D) Hive에 6m마다 저장
-    final acc = loc.coords.accuracy ?? 999.0;
     _locationService.maybeSavePosition(LatLng(ekfLat, ekfLon), fusedAlt, acc);
 
     // (E) [추가] "혹시 새로 Hive에 저장됐으면, 거리/고도 누적 업데이트"
