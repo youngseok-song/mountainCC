@@ -86,6 +86,9 @@ void main() async {
     }
     // locationManager => Outlier + EKF + MovementService + Hive
     locationManager.onNewLocation(location, ignoreData: ignore);
+
+    // 다시 한 번 setState()
+    mapScreenKey.currentState?.setState(() {});
   });
 
   // 2) 헤드리스 등록
