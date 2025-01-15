@@ -163,11 +163,6 @@ class MapScreenState extends State<MapScreen> {
     // 이미 시작 중이거나 이미 운동 중이면 return
     if (_isStartingWorkout || _isWorkoutStarted) return;
 
-    setState(() {
-      _isStartingWorkout = true;
-      _isPreparing = true;  // ← 운동시작 시 “준비 중” 상태
-    });
-
     // 위치 권한(항상 허용) 체크
     final hasAlways = await _checkAndRequestAlwaysPermission();
     if (!hasAlways) {
@@ -177,31 +172,33 @@ class MapScreenState extends State<MapScreen> {
       return;
     }
 
-    // UI 상태 갱신 (운동 시작)
+    // 만약 화면이 사라졌다면(return)
+    if (!mounted) {
+      setState(() {
+        _isStartingWorkout = false;
+      });
+      return;
+    }
+
+    // (1) UI 상태: 운동 준비 중 표시 + resetAll()
     setState(() {
+      _isStartingWorkout = true;
+      _isPreparing = true;  // “준비 중” 상태
       _movementService.resetAll();
       _isWorkoutStarted = true;
       _isPaused = false;
       _elapsedTime = "00:00:00";
-
-      // MovementService 초기화 (스톱워치, 폴리라인, 고도 등)
-      _movementService.resetAll();
     });
 
-    // 운동에 필요한 센서들 구독 및 위치 시작
+    // (2) 필요한 센서 구독 & BG 위치 추적 start
     _movementService.startBarometer();
     _movementService.startGyroscope();
     _movementService.startCompass();
     _movementService.startAccelerometer();
     await _locationService.startBackgroundGeolocation();
 
-
-
-    // (C) 첫 위치를 즉시 가져오기 (getCurrentPosition)
-    final currentLoc = await bg.BackgroundGeolocation.getCurrentPosition(
-      desiredAccuracy: bg.Config.DESIRED_ACCURACY_HIGH,
-      timeout: 30,
-    );
+    // (3) 여기서 10초 기다린 뒤에
+    await Future.delayed(const Duration(seconds: 10));
 
     // 만약 화면이 사라졌다면(return)
     if (!mounted) {
@@ -211,33 +208,35 @@ class MapScreenState extends State<MapScreen> {
       return;
     }
 
+    // 10초가 지났으므로 → 이제부터 데이터 사용 허용 & 스톱워치 시작
+    setState(() {
+      _movementService.setIgnoreAllData(false);  // EKF 활성화
+      _movementService.startStopwatch();         // 운동 시간 스톱워치 시작
+      _updateElapsedTime();                      // 1초 간격 UI 갱신
+      _isPreparing = false;                     // “준비 중” 해제
+    });
+
+    // (4) 첫 위치를 10초 뒤에 가져오기
+    final currentLoc = await bg.BackgroundGeolocation.getCurrentPosition(
+      desiredAccuracy: bg.Config.DESIRED_ACCURACY_HIGH,
+      timeout: 30,
+    );
+
     // 첫 위치 처리
     setState(() {
       _currentBgLocation = currentLoc;
-
-      // MovementService에 onNewLocation
-      _movementService.onNewLocation(currentLoc, ignoreData: true);
+      _movementService.onNewLocation(currentLoc, ignoreData: false);
 
       // 지도 카메라 첫 이동
       if (_mapIsReady) {
         _mapController.move(
-          LatLng(currentLoc.coords.latitude-0.0005, currentLoc.coords.longitude),
+          LatLng(
+            currentLoc.coords.latitude - 0.0005,
+            currentLoc.coords.longitude,
+          ),
           18.0,
         );
       }
-    });
-
-    // 3초 뒤 -> ignoreDataFirst3s=false
-    Future.delayed(const Duration(seconds: 10), () {
-      if (!mounted) return;
-      setState(() {
-        // 1) MovementService에 "이제부터 data 사용" 알림
-        _movementService.setIgnoreAllData(false);
-        // **운동 스톱워치** 시작
-        _movementService.startStopwatch();
-        _updateElapsedTime(); // 1초 간격 갱신
-        _isPreparing = false; // ← “준비 중” 해제 → 정식 UI
-      });
     });
 
     // 시작 절차 완료
@@ -287,6 +286,7 @@ class MapScreenState extends State<MapScreen> {
     _movementService.stopCompass();
     _movementService.stopAccelerometer();
 
+    _movementService.setIgnoreAllData(true);
     // onStopWorkout 콜백이 있다면 호출 (WebView 복귀 등)
     widget.onStopWorkout?.call();
 
@@ -411,14 +411,11 @@ class MapScreenState extends State<MapScreen> {
                 ),
               ),
               // 3) 위치 정확도 원 (Circle)
-              if (_currentBgLocation != null)
+              if (_movementService.polylinePoints.isNotEmpty)
                 CircleLayer(
                   circles: [
                     CircleMarker(
-                      point: LatLng(
-                        _currentBgLocation!.coords.latitude,
-                        _currentBgLocation!.coords.longitude,
-                      ),
+                      point: _movementService.polylinePoints.last,
                       radius: clampedAccuracy,
                       useRadiusInMeter: true,
                       color: Colors.red.withAlpha(50),
