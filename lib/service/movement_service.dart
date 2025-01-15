@@ -16,12 +16,19 @@ import 'package:latlong2/latlong.dart';
 import 'package:sensors_plus/sensors_plus.dart'; // Barometer, Gyro
 import '../models/sensor_fusion.dart'; // SensorFusion 객체 (Dead Reckoning, Baro/GPS 혼합)
 // (A) EKF 임포트
+import 'package:flutter_compass/flutter_compass.dart';
 import 'extended_kalman_filter.dart';
 import 'location_service.dart'; // ← Hive 쓰려면 필요
 
 
 // MovementService 클래스
 class MovementService {
+  bool _ignoreAllData = true;  // 기본 true (초기에는 '사용 안 함')
+  // setter
+  void setIgnoreAllData(bool ignore) {
+    _ignoreAllData = ignore;
+  }
+  bool get ignoreAllData => _ignoreAllData;
   // [1] EKF 인스턴스 추가
   // EKF를 '외부'에서 주입받아 사용
   final ExtendedKalmanFilter ekf;
@@ -88,7 +95,6 @@ class MovementService {
 
   /// 바로미터 이벤트 구독(subscribe) 관리
   StreamSubscription<BarometerEvent>? _barometerSub;
-
   /// 현재 기압(hPa)을 임시 저장
   double? _currentPressureHpa;
 
@@ -98,9 +104,20 @@ class MovementService {
 
   /// 자이로 이벤트 구독(subscribe) 관리
   StreamSubscription<GyroscopeEvent>? _gyroscopeSub;
-
   /// 이전 자이로 시간(timestamp) (dt 계산용)
   int? _lastGyroTimestamp;
+  /// 가속도 이벤트 구독(subscribe) 관리
+  StreamSubscription<AccelerometerEvent>? _accelSub;
+ /// 이전 가속도 시간(timestamp) (dt 계산용)
+  int? _lastAccelTimestampUs;
+  double _lastGyroValue = 0.0; // movement_service 필드
+
+  /// Compass 구독을 위한 subscription
+  StreamSubscription<CompassEvent>? _compassSub;
+  /// heading 값 (UI에서 읽을 수 있도록 getter 제공)
+  double _currentHeadingRad = 0.0; // 라디안
+
+
 
   // ---------------------------------------------------
   // (C) SensorFusion: Dead Reckoning + Baro/GPS 혼합
@@ -124,6 +141,71 @@ class MovementService {
   // ---------------------------------------------------
   double? _lastAltitude;
   int? _lastTimestampMs;
+
+  void startAccelerometer() {
+    if (_accelSub != null) return;
+
+    _lastAccelTimestampUs = DateTime.now().microsecondsSinceEpoch;
+    _accelSub = accelerometerEventStream().listen((event){
+      if (_ignoreAllData) return;
+
+      final nowUs = DateTime.now().microsecondsSinceEpoch;
+      final dtSec = (nowUs - (_lastAccelTimestampUs ?? nowUs)) / 1e6;
+      _lastAccelTimestampUs = nowUs;
+
+      double axRaw = event.x;
+      double ayRaw = event.y;
+      double azRaw = event.z;
+      azRaw -= 9.81; // 중력 제거(단순)
+
+      double headingRad = ekf.X[4];
+      final cosH = math.cos(headingRad);
+      final sinH = math.sin(headingRad);
+      double axGlobal = axRaw*cosH - ayRaw*sinH;
+      double ayGlobal = axRaw*sinH + ayRaw*cosH;
+
+      double gz = _lastGyroValue;  // 자이로에서 계속 갱신되는 값
+      // 여기서 한 번의 predict
+      ekf.predict(dtSec, gz, axGlobal, ayGlobal);
+    });
+  }
+
+  void stopAccelerometer() {
+    _accelSub?.cancel();
+    _accelSub = null;
+    _lastAccelTimestampUs = null;
+  }
+
+
+
+  // 나침반 관련
+  void startCompass() {
+    if (_compassSub != null) return;
+
+    // flutter_compass 예시
+    _compassSub = FlutterCompass.events?.listen((CompassEvent event) {
+      if (event.heading == null) return;
+      if (_ignoreAllData) {
+        // 10초 동안은 ekf.updateHeading 안 한다
+        return;
+      }
+      // heading(도 단위, 0..360)
+      final headingDeg = event.heading!;
+      // 라디안 변환
+      final headingRad = headingDeg * math.pi / 180.0;
+
+      // (1) EKF update
+      ekf.updateHeading(headingRad);
+
+      // (2) MovementService 내부에 저장 (UI 표시용)
+      _currentHeadingRad = headingRad;
+    });
+  }
+
+  void stopCompass() {
+    _compassSub?.cancel();
+    _compassSub = null;
+  }
 
   // =========================================================================
   // 1) Barometer 제어 (start/stop)
@@ -175,19 +257,16 @@ class MovementService {
 
     _lastGyroTimestamp = DateTime.now().microsecondsSinceEpoch;
 
-    _gyroscopeSub = gyroscopeEventStream().listen(
-          (GyroscopeEvent event) {
-        if (_lastGyroTimestamp == null) {
-          _lastGyroTimestamp = DateTime.now().microsecondsSinceEpoch;
-          return;
-        }
-        final nowUs = DateTime.now().microsecondsSinceEpoch;
-        // dt(초 단위)
-        final dt = (nowUs - _lastGyroTimestamp!) / 1_000_000.0;
-        _lastGyroTimestamp = nowUs;
-
-        // SensorFusion에 자이로(Z축 회전) 전달
-        _fusion.onGyroscope(event.z, dt);
+    _gyroscopeSub = gyroscopeEventStream().listen((GyroscopeEvent event) {
+      if (_ignoreAllData) {
+        // 10초 동안은 자이로 predict 안 한다
+        return;
+      }
+      _lastGyroValue = event.z;
+      if (_lastGyroTimestamp == null) {
+        _lastGyroTimestamp = DateTime.now().microsecondsSinceEpoch;
+        return;
+      }
       },
       onError: (err) {
         // 필요시 에러 처리
@@ -250,7 +329,9 @@ class MovementService {
   /// BG plugin의 onLocation()에서 호출
   (LatLng?, double?, double?) onNewLocation(bg.Location loc, {bool ignoreData = false}) {
     // (A) 카운트 다운 중
-    if (ignoreData) return (null, null, null);
+    if (_ignoreAllData || ignoreData) {
+      return (null,null,null);
+    }
 
     // (B) Outlier 검사
     if (isOutlier(loc)) {
@@ -307,38 +388,32 @@ class MovementService {
 
   //칼만필터 관련 로직
   ( double, double, double )? _applyKalmanFilter(bg.Location loc) {
-    // scale 변환
     const double scale = 111000.0;
     final double gpsX = loc.coords.longitude * scale;
     final double gpsY = loc.coords.latitude * scale;
 
-    // 우선 updateGPS
-    ekf.updateGPS(gpsX, gpsY);
-
     final acc = loc.coords.accuracy;
 
-    // 1) EKF 초기화 체크
+    // 1) EKF 초기화 체크 (그대로)
     if (!_ekfInitialized) {
-      // 정확도가 50 미만이면 init
       if (acc < 50.0) {
         ekf.initWithGPS(gpsX, gpsY);
-        setInitialBaroOffsetIfPossible(loc.coords.altitude);
         _ekfInitialized = true;
-        // initWithGPS 직후에는 predict() 스킵해서 안정화
-        // → 이 시점엔 아직 (ekf.x, ekf.y)가 새로 설정됐으므로
-        //   "즉시 return null"로 onNewLocation이 early return 하도록
+        // 초기화 직후 → "즉시 return null"로 skip
         return null;
       } else {
-        // accuracy가 너무 커서 아직 init 못 함 → null
+        // accuracy가 너무 커서 아직 init 못 함
         return null;
       }
-    } else {
-      // EKF가 이미 초기화됐다면 → predict
-      final double dt = _computeDeltaTime(loc);
-      ekf.predict(dt);
     }
 
-    // 여기까지 왔으면 (ekf.x, ekf.y)는 업데이트됨
+    // (기존) else { ekf.predict(dt); } 부분 **삭제**
+    // → 자이로 이벤트에서 이미 predict를 매번 하기 때문에
+    //   여기서 또 predict를 부르면 중복
+
+    // 2) GPS update
+    ekf.updateGPS(gpsX, gpsY);
+
     final double ekfLat = ekf.y / scale;
     final double ekfLon = ekf.x / scale;
 
@@ -498,6 +573,10 @@ class MovementService {
     // Barometer, Gyro 구독 해제
     stopBarometer();
     stopGyroscope();
+    stopCompass();
+
+    _currentHeadingRad = 0.0;
+    ekf.initWithGPS(0.0, 0.0);
 
     // 폴리라인, 누적고도, 스톱워치 등 초기화
     _polylinePoints.clear();
@@ -522,8 +601,8 @@ class MovementService {
   // 11) heading (방향) 값 Getter
   // =========================================================================
   /// 라디안 단위 (0 ~ 2π)
-  double get headingRad => _fusion.heading;
+  double get headingRad => _currentHeadingRad;
 
   /// 도(deg) 단위 (0 ~ 360)
-  double get headingDeg => (_fusion.heading * 180.0 / math.pi) % 360.0;
+  double get headingDeg => (ekf.X[4] * 180.0 / math.pi) % 360.0;
 }

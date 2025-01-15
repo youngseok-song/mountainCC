@@ -17,7 +17,6 @@ import 'package:hive/hive.dart';
 
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_compass/flutter_compass.dart';
 
 import 'package:flutter_background_geolocation/flutter_background_geolocation.dart' as bg;
 import 'package:flutter_svg/flutter_svg.dart';
@@ -77,19 +76,12 @@ class MapScreenState extends State<MapScreen> {
   bool _isPaused = false;           // 일시중지 상태
   String _elapsedTime = "00:00:00"; // 스톱워치 UI용
 
-  bool get ignoreDataFirst3s => _ignoreDataFirst3s;
   bool get isPaused => _isPaused;
 
   set currentBgLocation(bg.Location? loc) {
     _currentBgLocation = loc;
   }
 
-  // -----------------------------------------
-  // (추가) compass 사용
-  // -----------------------------------------
-  StreamSubscription<CompassEvent>? _compassSub;
-  double? _compassHeading; // 도(0=북, 90=동, 180=남, 270=서)
-  bool _ignoreDataFirst3s = true; // 운동 시작 후 3초간은 계산 무시
   bool _isPreparing = false; //운동 준비 중
 
 
@@ -106,9 +98,6 @@ class MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
-    // compass 해제
-    _compassSub?.cancel();
-    _compassSub = null;
     super.dispose();
   }
 
@@ -116,25 +105,6 @@ class MapScreenState extends State<MapScreen> {
     setState(() {
       _currentBgLocation = loc;
     });
-  }
-
-  void _startCompass() {
-    // flutter_compass의 이벤트 스트림 구독
-    _compassSub = FlutterCompass.events!.listen((CompassEvent event) {
-      if (event.heading != null) {
-        // 만약 3초 전에는 heading을 무시하고 싶으면:
-        if (!_ignoreDataFirst3s) {
-          setState(() {
-            _compassHeading = event.heading;
-          });
-        }
-      }
-    });
-  }
-
-  void _stopCompass() {
-    _compassSub?.cancel();
-    _compassSub = null;
   }
 
   // ------------------------------------------------------------
@@ -218,12 +188,14 @@ class MapScreenState extends State<MapScreen> {
       _movementService.resetAll();
     });
 
-    // (A) Barometer, Gyro 시작
+    // 운동에 필요한 센서들 구독 및 위치 시작
     _movementService.startBarometer();
     _movementService.startGyroscope();
+    _movementService.startCompass();
+    _movementService.startAccelerometer();
+    await _locationService.startBackgroundGeolocation();
 
-    // *** Compass 시작 추가 ***
-    _startCompass();
+
 
     // (C) 첫 위치를 즉시 가져오기 (getCurrentPosition)
     final currentLoc = await bg.BackgroundGeolocation.getCurrentPosition(
@@ -264,7 +236,8 @@ class MapScreenState extends State<MapScreen> {
     Future.delayed(const Duration(seconds: 10), () {
       if (!mounted) return;
       setState(() {
-        _ignoreDataFirst3s = false;
+        // 1) MovementService에 "이제부터 data 사용" 알림
+        _movementService.setIgnoreAllData(false);
         // **운동 스톱워치** 시작
         _movementService.startStopwatch();
         _updateElapsedTime(); // 1초 간격 갱신
@@ -276,8 +249,6 @@ class MapScreenState extends State<MapScreen> {
     setState(() {
       _isStartingWorkout = false;
     });
-
-    await _locationService.startBackgroundGeolocation();
   }
 
   // ------------------------------------------------------------
@@ -318,7 +289,8 @@ class MapScreenState extends State<MapScreen> {
     // (B) Barometer, Gyroscope, Compass 정지
     _movementService.stopBarometer();
     _movementService.stopGyroscope();
-    _stopCompass();  // <-- Compass 정지 호출
+    _movementService.stopCompass();
+    _movementService.stopAccelerometer();
 
     // onStopWorkout 콜백이 있다면 호출 (WebView 복귀 등)
     widget.onStopWorkout?.call();
@@ -470,7 +442,7 @@ class MapScreenState extends State<MapScreen> {
                       width: 40.0,
                       height: 40.0,
                       child: _buildGoogleStyleMarker(
-                        (_compassHeading ?? 0) * math.pi / 180,
+                        (_movementService.headingDeg) * math.pi / 180,
                       ),
                     ),
                   ],
