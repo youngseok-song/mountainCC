@@ -247,75 +247,106 @@ class MovementService {
   // =========================================================================
   // 5) onNewLocation → Outlier → EKF → 폴리라인/고도
   // =========================================================================
-
   /// BG plugin의 onLocation()에서 호출
-  ///  - ignoreData: 특정 상황(카운트다운) 등에서 데이터를 무시할 때
   (LatLng?, double?, double?) onNewLocation(bg.Location loc, {bool ignoreData = false}) {
+    // (A) 카운트 다운 중
     if (ignoreData) return (null, null, null);
 
-    // (A) Outlier 검사
-    // (A) Outlier 검사
+    // (B) Outlier 검사
     if (isOutlier(loc)) {
       return (null, null, null); // 이상치면 저장 안 함
     }
 
-    // scale 변환 후 ekf.updateGPS(gpsX, gpsY);
-    final double scale = 111000.0;
-    double gpsX = loc.coords.longitude * scale;
-    double gpsY = loc.coords.latitude * scale;
-    ekf.updateGPS(gpsX, gpsY);
-
-    final acc = loc.coords.accuracy ?? 999.0;
-    // 2) 만약 아직 EKF 초기화가 안 됐다면 → 여기가 첫 위치 콜백일 수 있음
-    if (!_ekfInitialized) {
-      // 아직 초기화 안 됐으면, 정확도 검사
-      if (acc < 50.0) {
-        ekf.initWithGPS(gpsX, gpsY);
-        _ekfInitialized = true;
-        return (null, null, null);
-      } else {
-        // accuracy가 너무 커서 아직 초기화 못 함 → 그냥 return
-        return (null, null, null);
-      }
-    } else {
-      // EKF가 이미 초기화됐으면 → predict / updateGPS
-      double dt = _computeDeltaTime(loc);
-      ekf.predict(dt);
+    // (C) 칼만필터 적용 (새 메서드로 분리)
+    final result = _applyKalmanFilter(loc);
+    if (result == null) {
+      // EKF 초기화가 안 되었거나 accuracy가 커서 early return
+      return (null, null, null);
     }
 
-    // (4) 결과(ekf.x, ekf.y)를 사용해 폴리라인 추가, 고도 계산 등
-    double ekfLat = ekf.y / scale;
-    double ekfLon = ekf.x / scale;
-    _polylinePoints.add(LatLng(ekfLat, ekfLon));
+    // result가 (ekfLat, ekfLon, acc) 형태이므로, 구조분해 할당
+    final (ekfLat, ekfLon, acc) = result;
 
-    // (E) 고도 계산 (기존 SensorFusion + Baro)
-    final gpsAlt = loc.coords.altitude;
-    final fusedAlt = _fusion.getFusedAltitude() ?? gpsAlt;
-
-
-    // Baro offset 주기적 보정
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
-    if (nowMs - _lastOffsetUpdateTime > _offsetUpdateInterval) {
-      _updateBaroOffsetIfNeeded(gpsAlt);
-      _lastOffsetUpdateTime = nowMs;
-    }
-
-    // (F) Outlier 판단용 기록(고도 기준)
-    _lastAltitude = gpsAlt;
-    _lastTimestampMs = _parseTimestamp(loc.timestamp)
-        ?? DateTime.now().millisecondsSinceEpoch;
+    final fusedAlt = _handleAltitudeAndBaro(loc);
 
     // (D) Hive에 6m마다 저장
     _locationService.maybeSavePosition(LatLng(ekfLat, ekfLon), fusedAlt, acc);
+    // (4) 결과(ekf.x, ekf.y)를 사용해 폴리라인 추가, 고도 계산 등
+    _polylinePoints.add(LatLng(ekfLat, ekfLon));
 
-    // (E) [추가] "혹시 새로 Hive에 저장됐으면, 거리/고도 누적 업데이트"
+    //"혹시 새로 Hive에 저장됐으면, 거리/고도 누적 업데이트"
     _updateStatsFromHive();
 
     // 반환 (ekf lat/lon, fused altitude, accuracy)
     return (LatLng(ekfLat, ekfLon), fusedAlt, acc);
   }
 
+  //고도계산 및 바로미터 계산
+  double  _handleAltitudeAndBaro(bg.Location loc) {
+    // (1) 고도 계산 (SensorFusion + Baro)
+    final gpsAlt = loc.coords.altitude;
+    final fusedAlt = _fusion.getFusedAltitude() ?? gpsAlt;
 
+    // (2) Baro offset 주기적 보정
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    if (nowMs - _lastOffsetUpdateTime > _offsetUpdateInterval) {
+      _updateBaroOffsetIfNeeded(gpsAlt);
+      _lastOffsetUpdateTime = nowMs;
+    }
+
+    // (3) Outlier 판단용 기록(고도 기준)
+    _lastAltitude = gpsAlt;
+    _lastTimestampMs = _parseTimestamp(loc.timestamp)
+        ?? DateTime.now().millisecondsSinceEpoch;
+
+    // (4) 원한다면 fusedAlt를 반환하거나,
+    //     onNewLocation에서 필요하면, MovementService 내부 필드로 보관하는 것도 가능.
+    return fusedAlt;
+  }
+
+
+  //칼만필터 관련 로직
+  ( double, double, double )? _applyKalmanFilter(bg.Location loc) {
+    // scale 변환
+    const double scale = 111000.0;
+    final double gpsX = loc.coords.longitude * scale;
+    final double gpsY = loc.coords.latitude * scale;
+
+    // 우선 updateGPS
+    ekf.updateGPS(gpsX, gpsY);
+
+    final acc = loc.coords.accuracy;
+
+    // 1) EKF 초기화 체크
+    if (!_ekfInitialized) {
+      // 정확도가 50 미만이면 init
+      if (acc < 50.0) {
+        ekf.initWithGPS(gpsX, gpsY);
+        setInitialBaroOffsetIfPossible(loc.coords.altitude);
+        _ekfInitialized = true;
+        // initWithGPS 직후에는 predict() 스킵해서 안정화
+        // → 이 시점엔 아직 (ekf.x, ekf.y)가 새로 설정됐으므로
+        //   "즉시 return null"로 onNewLocation이 early return 하도록
+        return null;
+      } else {
+        // accuracy가 너무 커서 아직 init 못 함 → null
+        return null;
+      }
+    } else {
+      // EKF가 이미 초기화됐다면 → predict
+      final double dt = _computeDeltaTime(loc);
+      ekf.predict(dt);
+    }
+
+    // 여기까지 왔으면 (ekf.x, ekf.y)는 업데이트됨
+    final double ekfLat = ekf.y / scale;
+    final double ekfLon = ekf.x / scale;
+
+    return (ekfLat, ekfLon, acc);
+  }
+
+
+ // 운동중 하단 패널 반영(거리/고도 누적 업데이트)
   void _updateStatsFromHive() {
     // 1) LocationService에서 현재 "마지막으로 저장된" 위치를 가져옴.
     final newHiveLatLng = _locationService.lastSavedPosition;
