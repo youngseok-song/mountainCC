@@ -82,7 +82,7 @@ void main() async {
     final mapState = mapScreenKey.currentState;
     bool ignore = false;
     if (mapState != null) {
-      ignore = mapState.ignoreDataFirst3s || mapState.isPaused;
+      ignore = mapState.isPaused;
       mapState.setState(() {
         mapState.currentBgLocation = location;
       });
