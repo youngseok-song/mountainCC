@@ -88,6 +88,8 @@ class MovementService {
 
   /// 누적 고도를 계산할 때 기준점이 될 고도
   double? _baseAltitude;
+  LatLng? _lastLatLng;  // "이전 위치"를 저장할 필드
+
 
   // ---------------------------------------------------
   // (B) 바로미터(Barometer) 관련
@@ -358,6 +360,11 @@ class MovementService {
     //"혹시 새로 Hive에 저장됐으면, 거리/고도 누적 업데이트"
     _updateStatsFromHive();
 
+    // 4) "이전 위치" 저장
+    _lastLatLng = LatLng(loc.coords.latitude, loc.coords.longitude);
+    _lastAltitude = loc.coords.altitude;
+    _lastTimestampMs = _parseTimestamp(loc.timestamp);
+
     // 반환 (ekf lat/lon, fused altitude, accuracy)
     return (LatLng(ekfLat, ekfLon), fusedAlt, acc);
   }
@@ -474,37 +481,19 @@ class MovementService {
     _prevHiveLatLng   = newHiveLatLng;
   }
 
-  // -------------------------------------------------------------------
-  // dt(초) 계산 → EKF predict에 사용
-  // -------------------------------------------------------------------
-  int? _lastEkfTimestampMs;
-  double _computeDeltaTime(bg.Location loc) {
-    int nowMs = _parseTimestamp(loc.timestamp)
-        ?? DateTime.now().millisecondsSinceEpoch;
-    if (_lastEkfTimestampMs == null) {
-      _lastEkfTimestampMs = nowMs;
-      return 1.0; // 첫 dt=1초 가정
-    }
-    double dtSec = (nowMs - _lastEkfTimestampMs!) / 1000.0;
-    _lastEkfTimestampMs = nowMs;
-    // 방어코드
-    if (dtSec < 0) dtSec = 0.01;
-    return dtSec;
-  }
-
   // =========================================================================
   // 6) Outlier(이상치) 검사 예시 (고도 기준)
   // =========================================================================
 
-  /// 간단한 Outlier 검사 (고도 갑작스런 튐)
-  bool isOutlier (bg.Location loc) {
+  /// Outlier 검사
+  bool isOutlier(bg.Location loc) {
     // 이전 값이 없으면 검사 불가
-    if (_lastAltitude == null || _lastTimestampMs == null) {
+    if (_lastAltitude == null || _lastTimestampMs == null || _lastLatLng == null) {
       return false;
     }
 
-    final nowMs = _parseTimestamp(loc.timestamp)
-        ?? DateTime.now().millisecondsSinceEpoch;
+    // (1) 시간차 계산
+    final nowMs = _parseTimestamp(loc.timestamp) ?? DateTime.now().millisecondsSinceEpoch;
     final dtMs = nowMs - _lastTimestampMs!;
     if (dtMs <= 0) {
       // 시간이 역행하거나 같은 Timestamp
@@ -512,10 +501,29 @@ class MovementService {
     }
 
     final dtSec = dtMs / 1000.0;
-    final altDiff = (loc.coords.altitude - _lastAltitude!).abs();
 
-    // 1초 이하에 altDiff >= 10m면 Outlier로 본다 (예시)
-    return (dtSec <= 1.0 && altDiff >= 10.0);
+    // (2) 고도 차이 검사
+    // "10초 안에 고도차가 ±20m 이상"
+    final altDiff = (loc.coords.altitude - _lastAltitude!).abs();
+    if (dtSec <= 10.0 && altDiff >= 20.0) {
+      return true;  // Outlier
+    }
+
+    // (3) 속도 검사
+    //  "10초 안에 시속 30km/h 이상"
+    //
+    //   - dist(m): _lastLatLng ~ 현재 loc 사이 거리
+    //   - speed(km/h) = (dist(m)/dtSec) * 3.6
+    final currentLatLng = LatLng(loc.coords.latitude, loc.coords.longitude);
+    final distMeter = Distance().distance(_lastLatLng!, currentLatLng);
+    final speedKmh = (distMeter / dtSec) * 3.6;
+
+    if (dtSec <= 10.0 && speedKmh >= 30.0) {
+      return true;  // Outlier
+    }
+
+    // 모든 검사 통과 시 -> Outlier 아님
+    return false;
   }
 
   /// Location timestamp 파싱 (int or String)
