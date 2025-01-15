@@ -385,7 +385,6 @@ class MovementService {
     return fusedAlt;
   }
 
-
   //칼만필터 관련 로직
   ( double, double, double )? _applyKalmanFilter(bg.Location loc) {
     const double scale = 111000.0;
@@ -403,7 +402,9 @@ class MovementService {
             gpsAccuracyM: acc,       // 그냥 GPS accuracy를 그대로 사용 (단위=m)
             headingAccuracyDeg: 50.0 // 초기 오차 50도 가정
         );
-
+        setInitialBaroOffsetIfPossible(
+          loc.coords.altitude,
+        );
         _ekfInitialized = true;
         // 초기화 직후 → "즉시 return null"로 skip
         return null;

@@ -218,11 +218,6 @@ class MapScreenState extends State<MapScreen> {
       // MovementService에 onNewLocation
       _movementService.onNewLocation(currentLoc, ignoreData: true);
 
-      // **중요**: 운동 시작 직후, Barometer offset 보정
-      _movementService.setInitialBaroOffsetIfPossible(
-        currentLoc.coords.altitude,
-      );
-
       // 지도 카메라 첫 이동
       if (_mapIsReady) {
         _mapController.move(
