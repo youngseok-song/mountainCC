@@ -25,9 +25,9 @@ class ExtendedKalmanFilter {
     // x,   y,   vx,   vy,   heading
     0.1,  0.0,  0.0,  0.0,  0.0,
     0.0,  0.1,  0.0,  0.0,  0.0,
-    0.0,  0.0,  1.0,  0.0,  0.0, // vx 잡음(가속도)
-    0.0,  0.0,  0.0,  1.0,  0.0, // vy 잡음(가속도)
-    0.0,  0.0,  0.0,  0.0,  0.5,
+    0.0,  0.0,  0.5,  0.0,  0.0, // vx 잡음(가속도)
+    0.0,  0.0,  0.0,  0.5,  0.0, // vy 잡음(가속도)
+    0.0,  0.0,  0.0,  0.0,  0.2,
   ];
 
   // ----------------------------------------------------
@@ -304,21 +304,44 @@ class ExtendedKalmanFilter {
   // ---------------------------------------------
   // (A) 첫 GPS 위치로 EKF를 초기화하는 메서드
   // ---------------------------------------------
-  void initWithGPS(double gpsX, double gpsY) {
-    // [x, y, vx, vy, heading]
+  void initWithGPS({
+    required double gpsX,
+    required double gpsY,
+    required double gpsAccuracyM,      // 예: 10m
+    required double headingAccuracyDeg // 예: 90°
+  }) {
+    // 1) 상태벡터를 [gpsX, gpsY, 0, 0, 0]으로 설정
     X[0] = gpsX;
     X[1] = gpsY;
-    X[2] = 0.0;
+    X[2] = 0.0; // 초기 속도 = 0
     X[3] = 0.0;
-    X[4] = 0.0;
+    X[4] = 0.0; // heading = 0 라디안 가정 (필요시 보정)
 
+    // 2) 각 축별 오차(분산) 계산
+    //    - 위치(x,y): (gpsAccuracyM)^2
+    //    - 속도(vx,vy): 일단 크게 (ex. 500 ~ 1000)
+    //    - heading: (headingAccuracyRad)^2
+    final posVar = gpsAccuracyM * gpsAccuracyM; // 예: (10)^2 => 100
+    final headingAccuracyRad = headingAccuracyDeg * 3.14159 / 180.0;
+    final headingVar = headingAccuracyRad * headingAccuracyRad;
+    // 예: headingAccuracyDeg=90 => headingAccuracyRad=1.57 => headingVar=약 2.47
+
+    // 속도쪽은 초기 불확실성을 크게 잡아둠(차후 필요하면 인자로 받거나 고정값)
+    const double velVar = 500.0; // 예: 500 (m^2/s^2)
+
+    // 3) 초기 공분산 P 세팅
+    // 5x5 형태 (x,y,vx,vy,heading)
+    //  [ posVar, 0,       0,      0,       0      ]
+    //  [ 0,      posVar,  0,      0,       0      ]
+    //  [ 0,      0,       velVar, 0,       0      ]
+    //  [ 0,      0,       0,      velVar,  0      ]
+    //  [ 0,      0,       0,      0,       headingVar ]
     P = [
-      800.0, 0.0,   0.0,   0.0,   0.0,
-      0.0,   800.0, 0.0,   0.0,   0.0,
-      0.0,   0.0,   800.0, 0.0,   0.0,
-      0.0,   0.0,   0.0,   800.0, 0.0,
-      0.0,   0.0,   0.0,   0.0,   800.0,
+      posVar,   0.0,      0.0,     0.0,      0.0,
+      0.0,      posVar,   0.0,     0.0,      0.0,
+      0.0,      0.0,      velVar,  0.0,      0.0,
+      0.0,      0.0,      0.0,     velVar,   0.0,
+      0.0,      0.0,      0.0,     0.0,      headingVar,
     ];
-    // 필요시 5번째 항만 3~400 정도, etc. 튜닝 가능
   }
 }

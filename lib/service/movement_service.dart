@@ -397,7 +397,13 @@ class MovementService {
     // 1) EKF 초기화 체크 (그대로)
     if (!_ekfInitialized) {
       if (acc < 50.0) {
-        ekf.initWithGPS(gpsX, gpsY);
+        ekf.initWithGPS(
+            gpsX: gpsX,
+            gpsY: gpsY,
+            gpsAccuracyM: acc,       // 그냥 GPS accuracy를 그대로 사용 (단위=m)
+            headingAccuracyDeg: 50.0 // 초기 오차 50도 가정
+        );
+
         _ekfInitialized = true;
         // 초기화 직후 → "즉시 return null"로 skip
         return null;
@@ -465,7 +471,6 @@ class MovementService {
 
     // 4) 마지막 좌표/고도 갱신
     _prevHiveLatLng   = newHiveLatLng;
-    _prevHiveAltitude = newAlt;
   }
 
   // -------------------------------------------------------------------
@@ -576,7 +581,12 @@ class MovementService {
     stopCompass();
 
     _currentHeadingRad = 0.0;
-    ekf.initWithGPS(0.0, 0.0);
+    ekf.initWithGPS(
+        gpsX: 0.0,
+        gpsY: 0.0,
+        gpsAccuracyM: 50.0,
+        headingAccuracyDeg: 90.0
+    );
 
     // 폴리라인, 누적고도, 스톱워치 등 초기화
     _polylinePoints.clear();
