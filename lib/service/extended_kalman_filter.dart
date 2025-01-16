@@ -9,6 +9,47 @@
 import 'dart:math' as math;
 
 class ExtendedKalmanFilter3D {
+
+  void setDynamicQ(double speedKmh, double gyroStd, double accelStd) {
+    // 예) 속도 범위 0~30km/h 사이로,  Q크기를 0.1~1.0 범위로 선형 보간
+    double speedRatio = (speedKmh.clamp(0.0, 30.0))/30.0;
+    double scaleQ = 0.1 + speedRatio*(1.0 - 0.1);
+    // gyroStd, accelStd도 별도 반영 가능
+
+    // Q는 7x7: [x, y, z, vx, vy, vz, heading]
+    // 단순 예시: 위치 3개, 속도 3개, heading 1개
+    Q[0] = 0.08 * scaleQ; // x
+    Q[8] = 0.08 * scaleQ; // y
+    Q[16] = 0.1 * scaleQ; // z
+    Q[24] = 0.2 * scaleQ; // vx
+    Q[32] = 0.2 * scaleQ; // vy
+    Q[40] = 0.3 * scaleQ; // vz
+    Q[48] = 0.1 + gyroStd*gyroStd; // heading (예: 자이로 std 반영)
+  }
+
+  void setDynamicR(double gpsAcc, double headingStd) {
+    // Rgps: 3x3
+    // gpsAcc => (gpsAcc^2)로 대각선에 반영, z는 수직정확도가 별도로 있으면 또 반영
+    double horizontalVar = gpsAcc*gpsAcc; // x,y
+    double verticalVar = gpsAcc*gpsAcc;   // z도 그냥 동일하게 쓰는 예
+
+    // Rgps[0] = x, Rgps[4] = y, Rgps[8] = z
+    Rgps[0] = horizontalVar;
+    Rgps[4] = horizontalVar;
+    Rgps[8] = verticalVar;
+
+    // heading
+    // Rheading[0] = headingStd^2
+    Rheading[0] = headingStd*headingStd;
+  }
+
+  void enlargeP(double factor) {
+    // 7x7
+    for(int i=0; i<7; i++){
+      P[i*7 + i] *= factor;
+    }
+  }
+
   // ---------------------------------------------
   // 상태 벡터: [ x, y, z, vx, vy, vz, heading ]
   // ---------------------------------------------
@@ -398,13 +439,13 @@ class ExtendedKalmanFilter3D {
     X[6] = 0.0;  // heading
 
     // gpsAccuracy^2 → 위치 분산, headingAccuracyRad^2 → heading 분산
-    double posVar = gpsAccuracyM * gpsAccuracyM;
+    double posVar = gpsAccuracyM * gpsAccuracyM * gpsAccuracyM;
     double headingAccuracyRad = headingAccuracyDeg * math.pi / 180.0;
     double headingVar = headingAccuracyRad * headingAccuracyRad;
 
     // 속도쪽 초기 불확실성 등은 크게
-    double velVar = 500.0;
-    double zVar   = 500.0; // 고도도 초기엔 크게 잡을 수 있음
+    double velVar = 10000.0;
+    double zVar   = 10000.0; // 고도도 초기엔 크게 잡을 수 있음
 
     // P 초기화 (diagonal)
     for (int i=0; i<49; i++){
@@ -419,3 +460,5 @@ class ExtendedKalmanFilter3D {
     P[48] = headingVar; // heading
   }
 }
+
+

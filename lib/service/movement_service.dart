@@ -23,6 +23,13 @@ import 'location_service.dart'; // ← Hive 쓰려면 필요
 
 // MovementService 클래스
 class MovementService {
+  bool _useKalmanFilter = true; // 기본값 칼만필터 모드
+
+  void setUseKalmanFilter(bool useKalman) {
+    _useKalmanFilter = useKalman;
+  }
+
+
   bool _ignoreAllData = true;  // 기본 true (초기에는 '사용 안 함')
   // setter
   void setIgnoreAllData(bool ignore) {
@@ -38,6 +45,17 @@ class MovementService {
     required this.ekf,
     required LocationService locationService,
   }) : _locationService = locationService;
+
+  // -------------------------------
+  // Ring buffers for dynamic std calc
+  // -------------------------------
+  final List<double> _recentCompassHeadings = [];
+  final List<double> _recentGyroZ = [];
+  final List<double> _recentAccelMag = [];
+
+  // 위치 기반 속도 계산용
+  bg.Location? _prevLoc;
+  int? _prevLocTimeMs;
 
   // ---------------------------------------------------
   // (A) 폴리라인, 스톱워치, 누적고도 등 '운동' 관련 필드
@@ -148,29 +166,34 @@ class MovementService {
   void startAccelerometer() {
     if (_accelSub != null) return;
 
-    _lastAccelTimestampUs = DateTime.now().microsecondsSinceEpoch;
     _accelSub = accelerometerEventStream().listen((event){
       if (_ignoreAllData) return;
 
+      // 중력 제거 (단순) or 더 정교한 방식
+      double ax = event.x;
+      double ay = event.y;
+      double az = event.z - 9.81;
+
+      // magnitude
+      double mag = math.sqrt(ax*ax + ay*ay + az*az);
+
+      _recentAccelMag.add(mag);
+      if (_recentAccelMag.length > 50) {
+        _recentAccelMag.removeAt(0);
+      }
+
+      // EKF predict
       final nowUs = DateTime.now().microsecondsSinceEpoch;
       final dtSec = (nowUs - (_lastAccelTimestampUs ?? nowUs)) / 1e6;
       _lastAccelTimestampUs = nowUs;
 
-      double axRaw = event.x;
-      double ayRaw = event.y;
-      double azRaw = event.z;
-      azRaw -= 9.81; // 중력 제거(단순)
-
       double headingRad = ekf.X[6];
       final cosH = math.cos(headingRad);
       final sinH = math.sin(headingRad);
-      double axGlobal = axRaw*cosH - ayRaw*sinH;
-      double ayGlobal = axRaw*sinH + ayRaw*cosH;
+      double axGlobal = ax*cosH - ay*sinH;
+      double ayGlobal = ax*sinH + ay*cosH;
 
-      double gz = _lastGyroValue;  // 자이로 z값(회전속도)
-
-      // 3D predict -> ekf.predict(dt, gz, ax, ay, az)
-      ekf.predict(dtSec, gz, axGlobal, ayGlobal, azRaw);
+      ekf.predict(dtSec, _lastGyroValue, axGlobal, ayGlobal, az);
     });
   }
 
@@ -180,28 +203,65 @@ class MovementService {
     _lastAccelTimestampUs = null;
   }
 
+  double _computeCurrentSpeedKmh(bg.Location loc) {
+    double speedKmh = 0.0;
+    if (_prevLoc != null && _prevLocTimeMs != null) {
+      final nowMs = _parseTimestamp(loc.timestamp) ?? DateTime.now().millisecondsSinceEpoch;
+      final dtSec = (nowMs - _prevLocTimeMs!) / 1000.0;
+      if (dtSec > 0) {
+        // dist in meter
+        final distMeter = Distance().distance(
+            LatLng(_prevLoc!.coords.latitude, _prevLoc!.coords.longitude),
+            LatLng(loc.coords.latitude, loc.coords.longitude)
+        );
+        double speedMs = distMeter / dtSec;
+        speedKmh = speedMs * 3.6;
+      }
+    }
+    // update prev
+    _prevLoc = loc;
+    _prevLocTimeMs = _parseTimestamp(loc.timestamp) ?? DateTime.now().millisecondsSinceEpoch;
+    return speedKmh;
+  }
+
+  double _computeStd(List<double> samples) {
+    if (samples.length < 2) return 0.0;
+
+    double mean = samples.reduce((a,b) => a+b) / samples.length;
+    double variance = 0.0;
+    for (double val in samples) {
+      double diff = val - mean;
+      variance += diff*diff;
+    }
+    variance /= (samples.length - 1);
+    return math.sqrt(variance);
+  }
+
 
 
   // 나침반 관련
   void startCompass() {
     if (_compassSub != null) return;
 
-    // flutter_compass 예시
     _compassSub = FlutterCompass.events?.listen((CompassEvent event) {
       if (event.heading == null) return;
-      if (_ignoreAllData) {
-        // 10초 동안은 ekf.updateHeading 안 한다
-        return;
-      }
-      // heading(도 단위, 0..360)
+
       final headingDeg = event.heading!;
-      // 라디안 변환
       final headingRad = headingDeg * math.pi / 180.0;
 
-      // (1) EKF update
+      // (1) ring buffer 저장
+      _recentCompassHeadings.add(headingRad);
+      if (_recentCompassHeadings.length > 30) {
+        // ex) 30개까지만 저장
+        _recentCompassHeadings.removeAt(0);
+      }
+
+      if (_ignoreAllData) return;
+
+      // EKF heading update
       ekf.updateHeading(headingRad);
 
-      // (2) MovementService 내부에 저장 (UI 표시용)
+      // MovementService 내부 저장 (UI 표시)
       _currentHeadingRad = headingRad;
     });
   }
@@ -259,23 +319,19 @@ class MovementService {
   void startGyroscope() {
     if (_gyroscopeSub != null) return;
 
-    _lastGyroTimestamp = DateTime.now().microsecondsSinceEpoch;
-
     _gyroscopeSub = gyroscopeEventStream().listen((GyroscopeEvent event) {
-      if (_ignoreAllData) {
-        // 10초 동안은 자이로 predict 안 한다
-        return;
+      if (_ignoreAllData) return;
+
+      // gz만 사용(회전속도 z축)
+      double gz = event.z;
+      // ring buffer
+      _recentGyroZ.add(gz);
+      if (_recentGyroZ.length > 50) {
+        _recentGyroZ.removeAt(0);
       }
-      _lastGyroValue = event.z;
-      if (_lastGyroTimestamp == null) {
-        _lastGyroTimestamp = DateTime.now().microsecondsSinceEpoch;
-        return;
-      }
-      },
-      onError: (err) {
-        // 필요시 에러 처리
-      },
-    );
+
+      _lastGyroValue = gz;
+    });
   }
 
   /// 자이로스코프 구독 해제
@@ -332,6 +388,14 @@ class MovementService {
   // =========================================================================
   /// BG plugin의 onLocation()에서 호출
   (LatLng?, double?, double?) onNewLocation(bg.Location loc, {bool ignoreData = false}) {
+    // 모드에 따라 분기
+    ( double, double, double )? result;
+    if (_useKalmanFilter) {
+      result = _applyKalmanFilter(loc);
+    } else {
+      result = _applyRawGPS(loc);
+    }
+
     // (A) 카운트 다운 중
     if (_ignoreAllData || ignoreData) {
       return (null,null,null);
@@ -344,7 +408,7 @@ class MovementService {
 
     // --------- 여기서 하나 골라 쓰기 ----------------
     // final result = _applyKalmanFilter(loc);  // (A) 칼만필터
-    final result = _applyRawGPS(loc);          // (B) Raw GPS
+    // final result = _applyRawGPS(loc);          // (B) Raw GPS
     // -----------------------------------------------
 
     if (result == null) {
@@ -422,10 +486,22 @@ class MovementService {
     final double gpsX = loc.coords.longitude * scale;
     final double gpsY = loc.coords.latitude * scale;
     final double gpsZ = _fusion.getFusedAltitude() ?? loc.coords.altitude;
+    final double acc = loc.coords.accuracy;
 
-    final acc = loc.coords.accuracy;
+    // (A) 1) headingStd: 나침반 std
+    double headingStd = _computeStd(_recentCompassHeadings);
+    // (B) 2) currentSpeed: 이전 loc와 비교
+    double currentSpeed = _computeCurrentSpeedKmh(loc);
+    // (C) 3) gyroStd
+    double gyroStd = _computeStd(_recentGyroZ);
+    // (D) 4) accelStd
+    double accelStd = _computeStd(_recentAccelMag);
 
-    // 1) EKF 초기화 체크 (그대로)
+    // 동적 R/Q 세팅
+    ekf.setDynamicR(acc, headingStd);
+    ekf.setDynamicQ(currentSpeed, gyroStd, accelStd);
+
+    // 1) EKF 초기화 체크
     if (!_ekfInitialized) {
       if (acc < 50.0) {
         ekf.initWithGPS(
@@ -439,10 +515,8 @@ class MovementService {
           loc.coords.altitude,
         );
         _ekfInitialized = true;
-        // 초기화 직후 → "즉시 return null"로 skip
         return null;
       } else {
-        // accuracy가 너무 커서 아직 init 못 함
         return null;
       }
     }
@@ -450,6 +524,7 @@ class MovementService {
     // 2) GPS update
     ekf.updateGPS(gpsX, gpsY, gpsZ);
 
+    // => ekf state
     final ekfLat = ekf.X[1] / scale;
     final ekfLon = ekf.X[0] / scale;
 

@@ -360,6 +360,82 @@ class MapScreenState extends State<MapScreen> {
     }
   }
 
+  Future<void> _startWorkoutKalman() async {
+    // (1) 모드 설정
+    widget.movementService.setUseKalmanFilter(true);
+    // (2) 나머지는 기존 _startWorkout() 로직(권한체크, 센서시작, BG start, 10초 대기 등)
+    await _startWorkoutCommon();
+  }
+
+  Future<void> _startWorkoutRaw() async {
+    // (1) 모드 설정
+    widget.movementService.setUseKalmanFilter(false);
+    // (2) 나머지는 동일
+    await _startWorkoutCommon();
+  }
+
+  Future<void> _startWorkoutCommon() async {
+    if (_isStartingWorkout || _isWorkoutStarted) return;
+
+    final hasAlways = await _checkAndRequestAlwaysPermission();
+    if (!hasAlways) {
+      setState(() { _isStartingWorkout = false; });
+      return;
+    }
+    if (!mounted) return;
+
+    setState(() {
+      _isStartingWorkout = true;
+      _isPreparing = true;
+      _movementService.resetAll();
+      _isWorkoutStarted = true;
+      _isPaused = false;
+      _elapsedTime = "00:00:00";
+    });
+
+    // 센서 구독, BG start
+    _movementService.startBarometer();
+    _movementService.startGyroscope();
+    _movementService.startCompass();
+    _movementService.startAccelerometer();
+    await widget.locationService.startBackgroundGeolocation();
+
+    // 10초 대기
+    await Future.delayed(const Duration(seconds: 10));
+    if (!mounted) {
+      setState(() { _isStartingWorkout = false; });
+      return;
+    }
+
+    // 데이터 허용 & 스톱워치 시작
+    setState(() {
+      _movementService.setIgnoreAllData(false);
+      _movementService.startStopwatch();
+      _updateElapsedTime();
+      _isPreparing = false;
+    });
+
+    // 첫 위치
+    final currentLoc = await bg.BackgroundGeolocation.getCurrentPosition(
+      desiredAccuracy: bg.Config.DESIRED_ACCURACY_HIGH,
+      timeout: 30,
+    );
+    setState(() {
+      _currentBgLocation = currentLoc;
+      _movementService.onNewLocation(currentLoc, ignoreData: false);
+      if (_mapIsReady) {
+        _mapController.move(
+          LatLng(
+            currentLoc.coords.latitude - 0.0005,
+            currentLoc.coords.longitude,
+          ),
+          18.0,
+        );
+      }
+      _isStartingWorkout = false;
+    });
+  }
+
   // ------------------------------------------------------------
   // (6) UI 빌드
   // ------------------------------------------------------------
@@ -456,7 +532,7 @@ class MapScreenState extends State<MapScreen> {
           // -------------------------------------------------
           // (B) 운동 전 => "운동 시작" 버튼
           // -------------------------------------------------
-          if (!_isWorkoutStarted)
+          /*if (!_isWorkoutStarted)
             Positioned(
               bottom: 60,
               left: 0,
@@ -486,6 +562,59 @@ class MapScreenState extends State<MapScreen> {
                       ),
                     ),
                   ),
+                ),
+              ),
+            ),*/
+
+          if (!_isWorkoutStarted)
+            Positioned(
+              bottom: 60,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    // (1) 칼만필터 모드 버튼
+                    ElevatedButton(
+                      onPressed: _isStartingWorkout ? null : _startWorkoutKalman,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white.withAlpha(210),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        elevation: 5.0,
+                      ),
+                      child: const Text(
+                        "운동 시작 (Kalman)",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+
+                    // (2) Raw GPS 모드 버튼
+                    ElevatedButton(
+                      onPressed: _isStartingWorkout ? null : _startWorkoutRaw,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white.withAlpha(210),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        elevation: 5.0,
+                      ),
+                      child: const Text(
+                        "운동 시작 (Raw)",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
