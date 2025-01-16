@@ -85,6 +85,7 @@ class MovementService {
   double get cumulativeDescent => _cumulativeDescentHive;
 
   bool _ekfInitialized = false;  // "EKF가 이미 초기화 되었는지" 여부 플래그
+  bool _baroOffsetInitialized = false; // 칼만필터 사용 안할때 변수
 
   /// 누적 고도를 계산할 때 기준점이 될 고도
   double? _baseAltitude;
@@ -395,6 +396,11 @@ class MovementService {
 
   // 원본 gps 로직
   ( double, double, double )? _applyRawGPS(bg.Location loc) {
+    if (!_baroOffsetInitialized) {
+      setInitialBaroOffsetIfPossible(loc.coords.altitude);
+      _baroOffsetInitialized = true;
+    }
+
     // 1) lat/lon 그대로 사용
     final lat = loc.coords.latitude;
     final lon = loc.coords.longitude;
@@ -605,6 +611,8 @@ class MovementService {
     stopGyroscope();
     stopCompass();
 
+    _baroOffsetInitialized = false; // 칼만필터 사용 안할때 변수
+
     _currentHeadingRad = 0.0;
     ekf.initWithGPS(
         gpsX: 0.0,
@@ -641,7 +649,9 @@ class MovementService {
 
   /// 도(deg) 단위 (0 ~ 360)
   double get headingDeg {
-    final deg = (ekf.X[6] * 180.0 / math.pi) % 360.0;
-    return deg < 0 ? deg + 360.0 : deg;
+    //final deg = (ekf.X[6] * 180.0 / math.pi) % 360.0;
+    //return deg < 0 ? deg + 360.0 : deg;
+
+    return (_currentHeadingRad * 180.0 / math.pi) % 360.0;
   }
 }
