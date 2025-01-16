@@ -341,10 +341,12 @@ class MovementService {
       return (null, null, null); // 이상치면 저장 안 함
     }
 
-    // (C) 칼만필터 적용 (새 메서드로 분리)
-    final result = _applyKalmanFilter(loc);
+    // --------- 여기서 하나 골라 쓰기 ----------------
+    // final result = _applyKalmanFilter(loc);  // (A) 칼만필터
+    final result = _applyRawGPS(loc);          // (B) Raw GPS
+    // -----------------------------------------------
+
     if (result == null) {
-      // EKF 초기화가 안 되었거나 accuracy가 커서 early return
       return (null, null, null);
     }
 
@@ -389,6 +391,23 @@ class MovementService {
     // (4) 원한다면 fusedAlt를 반환하거나,
     //     onNewLocation에서 필요하면, MovementService 내부 필드로 보관하는 것도 가능.
     return fusedAlt;
+  }
+
+  // 원본 gps 로직
+  ( double, double, double )? _applyRawGPS(bg.Location loc) {
+    // 1) lat/lon 그대로 사용
+    final lat = loc.coords.latitude;
+    final lon = loc.coords.longitude;
+    final acc = loc.coords.accuracy;
+
+    // 예를 들어, 거리를 구하기 위해서
+    // 기존 code에서 scale=111000.0 이런 건 전혀 안 씀
+    // 그냥 raw lat/lon 사용 or
+    // 필요하다면 MovementService가 lat/lon -> scale 단위로 쓰면
+    // (각자 프로젝트 구조에 맞게) 아래처럼 가능
+    // but 여기서는 "그대로 GPS"라는 의미로 raw를 씁니다.
+
+    return (lat, lon, acc);
   }
 
   //칼만필터 관련 로직
