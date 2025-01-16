@@ -31,7 +31,7 @@ class MovementService {
   bool get ignoreAllData => _ignoreAllData;
   // [1] EKF 인스턴스 추가
   // EKF를 '외부'에서 주입받아 사용
-  final ExtendedKalmanFilter ekf;
+  final ExtendedKalmanFilter3D  ekf;
   final LocationService _locationService;
 
   MovementService({
@@ -160,15 +160,16 @@ class MovementService {
       double azRaw = event.z;
       azRaw -= 9.81; // 중력 제거(단순)
 
-      double headingRad = ekf.X[4];
+      double headingRad = ekf.X[6];
       final cosH = math.cos(headingRad);
       final sinH = math.sin(headingRad);
       double axGlobal = axRaw*cosH - ayRaw*sinH;
       double ayGlobal = axRaw*sinH + ayRaw*cosH;
 
-      double gz = _lastGyroValue;  // 자이로에서 계속 갱신되는 값
-      // 여기서 한 번의 predict
-      ekf.predict(dtSec, gz, axGlobal, ayGlobal);
+      double gz = _lastGyroValue;  // 자이로 z값(회전속도)
+
+      // 3D predict -> ekf.predict(dt, gz, ax, ay, az)
+      ekf.predict(dtSec, gz, axGlobal, ayGlobal, azRaw);
     });
   }
 
@@ -352,8 +353,6 @@ class MovementService {
 
     final fusedAlt = _handleAltitudeAndBaro(loc);
 
-    // (D) Hive에 6m마다 저장
-    _locationService.maybeSavePosition(LatLng(ekfLat, ekfLon), fusedAlt, acc);
     // (4) 결과(ekf.x, ekf.y)를 사용해 폴리라인 추가, 고도 계산 등
     _polylinePoints.add(LatLng(ekfLat, ekfLon));
 
@@ -397,6 +396,7 @@ class MovementService {
     const double scale = 111000.0;
     final double gpsX = loc.coords.longitude * scale;
     final double gpsY = loc.coords.latitude * scale;
+    final double gpsZ = _fusion.getFusedAltitude() ?? loc.coords.altitude;
 
     final acc = loc.coords.accuracy;
 
@@ -406,8 +406,9 @@ class MovementService {
         ekf.initWithGPS(
             gpsX: gpsX,
             gpsY: gpsY,
-            gpsAccuracyM: acc,       // 그냥 GPS accuracy를 그대로 사용 (단위=m)
-            headingAccuracyDeg: 50.0 // 초기 오차 50도 가정
+            gpsZ: gpsZ,
+            gpsAccuracyM: acc,
+            headingAccuracyDeg: 50.0
         );
         setInitialBaroOffsetIfPossible(
           loc.coords.altitude,
@@ -421,15 +422,11 @@ class MovementService {
       }
     }
 
-    // (기존) else { ekf.predict(dt); } 부분 **삭제**
-    // → 자이로 이벤트에서 이미 predict를 매번 하기 때문에
-    //   여기서 또 predict를 부르면 중복
-
     // 2) GPS update
-    ekf.updateGPS(gpsX, gpsY);
+    ekf.updateGPS(gpsX, gpsY, gpsZ);
 
-    final double ekfLat = ekf.y / scale;
-    final double ekfLon = ekf.x / scale;
+    final ekfLat = ekf.X[1] / scale;
+    final ekfLon = ekf.X[0] / scale;
 
     return (ekfLat, ekfLon, acc);
   }
@@ -593,6 +590,7 @@ class MovementService {
     ekf.initWithGPS(
         gpsX: 0.0,
         gpsY: 0.0,
+        gpsZ: 0.0,
         gpsAccuracyM: 50.0,
         headingAccuracyDeg: 90.0
     );
@@ -623,5 +621,8 @@ class MovementService {
   double get headingRad => _currentHeadingRad;
 
   /// 도(deg) 단위 (0 ~ 360)
-  double get headingDeg => (ekf.X[4] * 180.0 / math.pi) % 360.0;
+  double get headingDeg {
+    final deg = (ekf.X[6] * 180.0 / math.pi) % 360.0;
+    return deg < 0 ? deg + 360.0 : deg;
+  }
 }

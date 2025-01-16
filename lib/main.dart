@@ -60,7 +60,7 @@ void main() async {
   await Hive.openBox<LocationData>('locationBox');
 
   // 1) EKF 준비
-  final ekf = ExtendedKalmanFilter();
+  final ekf = ExtendedKalmanFilter3D ();
   final locationBox = Hive.box<LocationData>('locationBox');
   final locationService = LocationService(locationBox);
 
