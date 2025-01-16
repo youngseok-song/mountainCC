@@ -388,13 +388,6 @@ class MovementService {
   // =========================================================================
   /// BG plugin의 onLocation()에서 호출
   (LatLng?, double?, double?) onNewLocation(bg.Location loc, {bool ignoreData = false}) {
-    // 모드에 따라 분기
-    ( double, double, double )? result;
-    if (_useKalmanFilter) {
-      result = _applyKalmanFilter(loc);
-    } else {
-      result = _applyRawGPS(loc);
-    }
 
     // (A) 카운트 다운 중
     if (_ignoreAllData || ignoreData) {
@@ -408,7 +401,7 @@ class MovementService {
 
     // --------- 여기서 하나 골라 쓰기 ----------------
     // final result = _applyKalmanFilter(loc);  // (A) 칼만필터
-    // final result = _applyRawGPS(loc);          // (B) Raw GPS
+     final result = _applyRawGPS(loc);          // (B) Raw GPS
     // -----------------------------------------------
 
     if (result == null) {
