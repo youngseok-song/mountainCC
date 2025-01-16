@@ -452,30 +452,31 @@ class _SummaryScreenState extends State<SummaryScreen>
     //    단계적으로 분포한 24개 RGBA 값입니다.
     //    (원하시는 색상으로 자유롭게 조정 가능)
     const List<Color> rainbow24 = [
-      Color(0xFFff0000), // 0  빨강
-      Color(0xFFff4500), // 1  약간 주황
-      Color(0xFFff6347), // 2  더 주황
-      Color(0xFFff6347), // 3  주황/노랑 사이
-      Color(0xFFff8c00), // 4  노랑
-      Color(0xFFffa500), // 5  노랑-연두 사이
-      Color(0xFFb8860b), // 6
-      Color(0xFFdaa520), // 7
-      Color(0xFFffd700), // 8  연두
-      Color(0xFFffff00), // 9
-      Color(0xFF9acd32), // 10 초록
-      Color(0xFF00FF55), // 11
-      Color(0xFF00FFAA), // 12 민트
-      Color(0xFF00FFEF), // 13 에메랄드/하늘 사이
-      Color(0xFF00EFFF), // 14 하늘
-      Color(0xFF00Aaff), // 15 하늘/파랑 사이
-      Color(0xFF006EFF), // 16
-      Color(0xFF0033FF), // 17 짙은 파랑
-      Color(0xFF3300FF), // 18 보라 기운
-      Color(0xFF6600FF), // 19
-      Color(0xFF7F00FF), // 20 보라
-      Color(0xFFAA00FF), // 21
-      Color(0xFFD400FF), // 22
-      Color(0xFFFF00FF), // 23 자홍(핑크-보라)
+      Color(0xFFFF0000), // Red
+      Color(0xFFFF2100),
+      Color(0xFFFF4200),
+      Color(0xFFFF6300),
+      Color(0xFFFF8400),
+      Color(0xFFFFA500), // Orange
+      Color(0xFFFFA500),
+      Color(0xFFFFB700),
+      Color(0xFFFFC900),
+      Color(0xFFFFDB00),
+      Color(0xFFFFED00),
+      Color(0xFFFFFF00), // Yellow
+      Color(0xFFFFFF00),
+      Color(0xFFCCE500),
+      Color(0xFF7cfc00),
+      Color(0xFF00ff00),
+      Color(0xFF32cd00),
+      Color(0xFF339900),
+      Color(0xFF228b22), // Green
+      Color(0xFF008000),
+      Color(0xFF006400),
+      Color(0xFF0A506B),
+      Color(0xFF003399),
+      Color(0xFF0019CC),
+      Color(0xFF0000FF), // Blue// Blue
     ];
 
     // 6) 최종 인덱스에 해당하는 색 리턴
