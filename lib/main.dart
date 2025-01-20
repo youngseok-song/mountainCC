@@ -8,7 +8,6 @@ import 'screens/webview_and_map_screen.dart'; // 새로 만든 화면 import
 import 'service/movement_service.dart';
 import 'service/location_service.dart';
 import 'service/location_manager.dart';
-import 'service/extended_kalman_filter.dart';
 import 'screens/map_screen.dart';
 
 // 1) 헤드리스 함수 정의
@@ -60,13 +59,11 @@ void main() async {
   await Hive.openBox<LocationData>('locationBox');
 
   // 1) EKF 준비
-  final ekf = ExtendedKalmanFilter3D ();
   final locationBox = Hive.box<LocationData>('locationBox');
   final locationService = LocationService(locationBox);
 
   // 2) 객체 준비
   final movementService = MovementService(
-    ekf: ekf,
     locationService: locationService, // 이 부분 꼭 추가
   );
 

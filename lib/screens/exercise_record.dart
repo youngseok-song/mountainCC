@@ -1033,35 +1033,32 @@ class _SummaryScreenState extends State<SummaryScreen>
     );
   }
 
+// 페이스 차트
   Widget _buildPaceChart() {
     return _buildLineChart(
       spots: _paceSpots,
       color: Colors.purple,
-      minY: 0,
-      leftInterval: 2.0,     // pace 2분 간격
-      bottomInterval: 1.0,   // 거리 1km
+      unitY: "m/k",  // 혹은 "min/km" 라벨 단위
       noDataText: "페이스 데이터가 없습니다.",
-      // maxY: 30,           // 필요 시 억지로 30분/킬로까지
     );
   }
 
+// 고도 차트
   Widget _buildAltitudeChart() {
     return _buildLineChart(
       spots: _altSpots,
       color: Colors.orange,
-      minY: 0,
-      leftInterval: 50.0,  // 고도 50m 간격
-      noDataText: "고도 데이터가 없습니다.",
       unitY: "m",
+      noDataText: "고도 데이터가 없습니다.",
     );
   }
 
+// 속도 차트
   Widget _buildSpeedChart() {
     return _buildLineChart(
       spots: _speedSpots,
       color: Colors.redAccent,
-      minY: 0,
-      leftInterval: 5.0,  // 속도 5km/h 간격
+      unitY: "km/h",
       noDataText: "속도 데이터가 없습니다.",
     );
   }
@@ -1149,20 +1146,37 @@ class _SummaryScreenState extends State<SummaryScreen>
 }
 
 
+/// 동적으로 X/Y 범위와 간격을 설정하는 LineChart
 Widget _buildLineChart({
   required List<FlSpot> spots,
   required Color color,
-  double minY = 0,
-  double? maxY,
-  double leftInterval = 5.0,
-  double bottomInterval = 1.0,
-  String unitY = "",   // y축 라벨 단위(예: "m", "", etc.)
-  String? noDataText,  // "데이터가 없습니다." 커스텀 문구
+  String unitY = "",           // Y축 라벨 단위
+  String? noDataText,
 }) {
+  // (A) 스팟이 비어있으면 "데이터 없음" 메시지
   if (spots.isEmpty) {
     return Center(child: Text(noDataText ?? "데이터가 없습니다."));
   }
 
+  // (B) X축 범위: [0, maxX]
+  final double maxX = spots.map((e) => e.x).reduce((a, b) => a > b ? a : b);
+  final double minX = 0.0; // 요구사항: X축 시작은 0
+
+  // X축 간격 (interval)
+  // => (maxX - 0) / 10
+  double xRange = maxX - minX;
+  double xInterval = xRange > 0 ? xRange / 10 : 1.0;
+  // (총 거리가 0이거나 매우 작으면 1로 fallback)
+
+  // (C) Y축 범위: [0, maxY]
+  final double maxY = spots.map((e) => e.y).reduce((a, b) => a > b ? a : b);
+  final double minY = 0.0; // 요구사항: Y축 시작은 0
+
+  double yRange = maxY - minY;
+  double yInterval = yRange > 0 ? yRange / 5 : 1.0;
+  // (최대값이 0이거나 매우 작으면 1로 fallback)
+
+  // (D) 차트에 표시할 라인
   final lineBarData = LineChartBarData(
     spots: spots,
     isCurved: true,
@@ -1171,58 +1185,71 @@ Widget _buildLineChart({
     dotData: FlDotData(show: false),
     belowBarData: BarAreaData(
       show: true,
-      color: color.withAlpha(50),
+      color: color.withOpacity(0.3),
     ),
   );
 
+  // (E) 최종 LineChart 반환
   return SizedBox(
     height: 200,
     child: LineChart(
       LineChartData(
+        // (1) X/Y 범위
+        minX: minX,
+        maxX: maxX,
+        minY: minY,
+        maxY: maxY,
+
+        // (2) 축/그리드 설정
+        gridData: FlGridData(show: true),
         borderData: FlBorderData(
           show: true,
           border: const Border(
-            left: BorderSide(color: Colors.grey, width: 1),
-            bottom: BorderSide(color: Colors.grey, width: 1),
+            left: BorderSide(color: Colors.grey),
+            bottom: BorderSide(color: Colors.grey),
             right: BorderSide(color: Colors.transparent),
             top: BorderSide(color: Colors.transparent),
           ),
         ),
-        minY: minY,
-        maxY: maxY,  // 필요하면 null 가능
-        gridData: FlGridData(show: true),
         titlesData: FlTitlesData(
-          // 왼쪽(Y축)
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
-              showTitles: true,       // 왼쪽만 표시
-              interval: leftInterval,
+              showTitles: true,
+              interval: yInterval,  // ← 동적 계산
               getTitlesWidget: (value, meta) {
-                // 만약 이 값이 y축 최대값과 같다면 표시 안 함
+                // Y축 라벨 (ex: "100 m", "10 km/h", etc.)
+                // 최댓값 라벨을 숨기고 싶다면 아래처럼 처리하거나 주석처리
                 if (value == meta.max) {
-                  return const SizedBox.shrink(); // 빈 위젯 반환
+                  return const SizedBox.shrink();
                 }
-                // 그 외는 기존 로직
                 final label = value.toStringAsFixed(0);
                 return Text("$label$unitY", style: const TextStyle(fontSize: 12));
               },
             ),
           ),
-          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
           bottomTitles: AxisTitles(
             sideTitles: SideTitles(
-              showTitles: true,       // 아래만 표시
-              interval: 1.5,           // 예) 1km마다 라벨
+              showTitles: true,
+              interval: xInterval, // ← 동적 계산
               getTitlesWidget: (value, meta) {
+                // X축 라벨 (distance in km)
                 if (value == meta.max) {
-                  return const SizedBox.shrink(); // 맨 끝 라벨 지움
+                  return const SizedBox.shrink();
                 }
-                return Text("${value.toStringAsFixed(1)} km", style: const TextStyle(fontSize: 12));
+                return Text("${value.toStringAsFixed(1)} km",
+                    style: const TextStyle(fontSize: 12));
               },
             ),
           ),
-          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          topTitles: AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
         ),
+
+        // (3) 실제 라인 데이터
         lineBarsData: [lineBarData],
       ),
     ),
