@@ -1038,7 +1038,7 @@ class _SummaryScreenState extends State<SummaryScreen>
     return _buildLineChart(
       spots: _paceSpots,
       color: Colors.purple,
-      unitY: "m/k",  // 혹은 "min/km" 라벨 단위
+      unitY: "",  // 혹은 "min/km" 라벨 단위
       noDataText: "페이스 데이터가 없습니다.",
     );
   }
@@ -1048,7 +1048,7 @@ class _SummaryScreenState extends State<SummaryScreen>
     return _buildLineChart(
       spots: _altSpots,
       color: Colors.orange,
-      unitY: "m",
+      unitY: "",
       noDataText: "고도 데이터가 없습니다.",
     );
   }
@@ -1058,7 +1058,7 @@ class _SummaryScreenState extends State<SummaryScreen>
     return _buildLineChart(
       spots: _speedSpots,
       color: Colors.redAccent,
-      unitY: "km/h",
+      unitY: "",
       noDataText: "속도 데이터가 없습니다.",
     );
   }
@@ -1236,7 +1236,7 @@ Widget _buildLineChart({
                 if (value == meta.max) {
                   return const SizedBox.shrink();
                 }
-                return Text("${value.toStringAsFixed(1)} km",
+                return Text("${value.toStringAsFixed(1)}",
                     style: const TextStyle(fontSize: 12));
               },
             ),
