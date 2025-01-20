@@ -1185,7 +1185,7 @@ Widget _buildLineChart({
     dotData: FlDotData(show: false),
     belowBarData: BarAreaData(
       show: true,
-      color: color.withOpacity(0.3),
+      color: color.withAlpha(75),
     ),
   );
 
@@ -1222,7 +1222,7 @@ Widget _buildLineChart({
                 if (value == meta.max) {
                   return const SizedBox.shrink();
                 }
-                final label = value.toStringAsFixed(0);
+                final label = value.toStringAsFixed(1);
                 return Text("$label$unitY", style: const TextStyle(fontSize: 12));
               },
             ),
