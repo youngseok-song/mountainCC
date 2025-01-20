@@ -44,6 +44,7 @@ class MovementService {
   }) : _locationService = locationService;
 
 
+
   // ---------------------------------------------------
   /// (A) 폴리라인, 스톱워치, 누적고도 등 '운동' 관련 필드
   // ---------------------------------------------------
@@ -91,8 +92,6 @@ class MovementService {
 
   bool _baroOffsetInitialized = false; // 칼만필터 사용 안할때 변수
 
-  /// 누적 고도를 계산할 때 기준점이 될 고도
-  double? _baseAltitude;
   LatLng? _lastLatLng;  // "이전 위치"를 저장할 필드
 
 
@@ -349,7 +348,6 @@ class MovementService {
     _distanceFromHiveKm = 0.0;
     _cumulativeElevationHive = 0.0;
     _cumulativeDescentHive = 0.0;
-    _baseAltitude = null;
     pauseStopwatch();
     resetStopwatch();
     _currentPressureHpa = null;
@@ -439,30 +437,63 @@ class MovementService {
       return false;
     }
 
-    /*final nowMs = _parseTimestamp(loc.timestamp) ?? DateTime.now().millisecondsSinceEpoch;
+    final nowMs = _parseTimestamp(loc.timestamp) ?? DateTime.now().millisecondsSinceEpoch;
     final dtMs = nowMs - _lastTimestampMs!;
     if (dtMs <= 0) {
       return false;
     }
     final dtSec = dtMs / 1000.0;
 
-    // (A) 고도 차
-    final altDiff = (loc.coords.altitude - _lastAltitude!).abs();
-
-    final altChangePerSec = altDiff / dtSec;
-    if (altChangePerSec > 10.0) {
-      return true;
-    }
-
-    // (B) 속도
-    final currentLatLng = LatLng(loc.coords.latitude, loc.coords.longitude);
-    final distMeter = Distance().distance(_lastLatLng!, currentLatLng);
-    final speedKmh = (distMeter / dtSec) * 3.6;
-
-    // 예: 시속 50km/h 초과
-    if (speedKmh > 130.0) {
+    /*if (dtSec < 1.0) {
+      // outlier
       return true;
     }*/
+
+    // (A) "LocationService"에 있는 currentActivity 가져오기
+    final activity = _locationService.currentActivity;
+    double speedLimitKmh;
+    double altRateLimit;
+
+    // (B) switch문
+    switch (activity) {
+      case 'on_foot':
+      case 'running':
+        speedLimitKmh = 25.0;
+        altRateLimit  = 10.0;
+        break;
+      case 'on_bicycle':
+        speedLimitKmh = 80.0;
+        altRateLimit  = 20.0;
+        break;
+      case 'in_vehicle':
+        speedLimitKmh = 200.0;
+        altRateLimit  = 50.0;
+        break;
+      default:
+        speedLimitKmh = 50.0;
+        altRateLimit  = 10.0;
+    }
+
+    // (C) 속도 계산
+    final distMeter = Distance().distance(_lastLatLng!, LatLng(loc.coords.latitude, loc.coords.longitude));
+    final speedKmh = (distMeter / dtSec) * 3.6;
+
+    if (speedKmh > speedLimitKmh) {
+      return true; // outlier
+    }
+
+    // (D) 고도 변화율 계산
+    final altDiff = (loc.coords.altitude - _lastAltitude!).abs();
+    final altRate = altDiff / dtSec; // m/s
+
+    if (altRate > altRateLimit) {
+      return true; // outlier
+    }
+
+    // (E) accuracy도 확인
+    if (loc.coords.accuracy != null && loc.coords.accuracy! > 100.0) {
+      return true;
+    }
 
     return false;
   }
@@ -513,11 +544,6 @@ class MovementService {
     final diff = gpsAlt - _fusion.baroAltitude!;
     _fusion.baroOffset = diff;
 
-    // === 추가: offset을 확 바꿨으니, baseAltitude를 새 융합고도에 맞춰버림 ===
-    final fusedAltNow = _fusion.getFusedAltitude();
-    if (fusedAltNow != null) {
-      _baseAltitude = fusedAltNow;
-    }
   }
 
 

@@ -1216,6 +1216,7 @@ Widget _buildLineChart({
             sideTitles: SideTitles(
               showTitles: true,
               interval: yInterval,  // ← 동적 계산
+              reservedSize: 60.0,
               getTitlesWidget: (value, meta) {
                 // Y축 라벨 (ex: "100 m", "10 km/h", etc.)
                 // 최댓값 라벨을 숨기고 싶다면 아래처럼 처리하거나 주석처리

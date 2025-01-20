@@ -11,7 +11,7 @@ class LocationService {
   // --------------------------
   /// BG plugin 에서 위치 콜백 발생시키는 최소 이동거리
   /// (Activity에 따라 바뀔 예정)
-  double _bgDistanceFilter = 6.0;
+  double _bgDistanceFilter = 3.0;
 
   /// Hive 저장 간격 (기본 6m)
   double _hiveDistanceFilter = 6.0;
@@ -22,6 +22,9 @@ class LocationService {
   // --------------------------
   final Box<LocationData> locationBox;
   LatLng? lastSavedPosition;
+
+
+  String get currentActivity => _currentActivity;
 
   bool _isTracking = false;   // 실제 추적 중?
   bool _isStarting = false;   // start() 절차 진행 중?
@@ -42,25 +45,25 @@ class LocationService {
 
       switch (_currentActivity) {
         case 'on_foot':
-          newBGFilter   = 6.0;   // 걸을 때
-          newHiveFilter = 6.0;
+          newBGFilter   = 3.0;   // 걸을 때
+          newHiveFilter = 3.0;
           break;
         case 'running':
-          newBGFilter   = 4.0;   // 뛸 때 더 자주
-          newHiveFilter = 4.0;
+          newBGFilter   = 3.0;   // 뛸 때 더 자주
+          newHiveFilter = 3.0;
           break;
         case 'on_bicycle':
           newBGFilter   = 15.0;  // 자전거면 좀 더 큰 필터
-          newHiveFilter = 20.0;
+          newHiveFilter = 15.0;
           break;
         case 'in_vehicle':
-          newBGFilter   = 40.0;  // 차량일 땐 더 크게
-          newHiveFilter = 50.0;
+          newBGFilter   = 20.0;  // 차량일 땐 더 크게
+          newHiveFilter = 20.0;
           break;
         default:
         // still, unknown 등
-          newBGFilter   = 10.0;
-          newHiveFilter = 10.0;
+          newBGFilter   = 3.0;
+          newHiveFilter = 6.0;
       }
 
       // BG plugin에 setConfig
