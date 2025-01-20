@@ -1,10 +1,25 @@
 // service/location_service.dart
+
 import 'package:flutter_background_geolocation/flutter_background_geolocation.dart' as bg;
 import 'package:latlong2/latlong.dart';
 import 'package:hive/hive.dart';
 import '../models/location_data.dart';
 
 class LocationService {
+  // --------------------------
+  // (A) distanceFilter 동적 변수
+  // --------------------------
+  /// BG plugin 에서 위치 콜백 발생시키는 최소 이동거리
+  /// (Activity에 따라 바뀔 예정)
+  double _bgDistanceFilter = 6.0;
+
+  /// Hive 저장 간격 (기본 6m)
+  double _hiveDistanceFilter = 6.0;
+
+  /// 현재 활동 상태(on_foot, running 등) 보관 (디버깅/로그용)
+  String _currentActivity = 'on_foot';
+
+  // --------------------------
   final Box<LocationData> locationBox;
   LatLng? lastSavedPosition;
 
@@ -13,21 +28,66 @@ class LocationService {
 
   LocationService(this.locationBox);
 
+  /// ===================================================
+  /// 0) [NEW] ActivityChange 핸들러 초기화
+  /// ===================================================
+  Future<void> _initActivityChangeListener() async {
+    bg.BackgroundGeolocation.onActivityChange((bg.ActivityChangeEvent event) async {
+      // event.activity => on_foot, running, on_bicycle, in_vehicle, still 등
+      _currentActivity = event.activity; // 보관 (로그용)
+
+      // (1) BG distanceFilter 변경
+      double newBGFilter;
+      double newHiveFilter;
+
+      switch (_currentActivity) {
+        case 'on_foot':
+          newBGFilter   = 6.0;   // 걸을 때
+          newHiveFilter = 6.0;
+          break;
+        case 'running':
+          newBGFilter   = 4.0;   // 뛸 때 더 자주
+          newHiveFilter = 4.0;
+          break;
+        case 'on_bicycle':
+          newBGFilter   = 15.0;  // 자전거면 좀 더 큰 필터
+          newHiveFilter = 20.0;
+          break;
+        case 'in_vehicle':
+          newBGFilter   = 40.0;  // 차량일 땐 더 크게
+          newHiveFilter = 50.0;
+          break;
+        default:
+        // still, unknown 등
+          newBGFilter   = 10.0;
+          newHiveFilter = 10.0;
+      }
+
+      // BG plugin에 setConfig
+      if (newBGFilter != _bgDistanceFilter) {
+        _bgDistanceFilter = newBGFilter;
+        await bg.BackgroundGeolocation.setConfig(
+          bg.Config(distanceFilter: _bgDistanceFilter),
+        );
+      }
+
+      // Hive 저장 간격도 변경
+      _hiveDistanceFilter = newHiveFilter;
+    });
+  }
+
   /// -------------------------------
   /// [NEW] 플러그인 현재 상태를 앱 변수와 동기화
   Future<void> syncStateFromPlugin() async {
-    // BG plugin의 state.enabled: (true면 이미 start()된 상태)
     final state = await bg.BackgroundGeolocation.state;
     _isTracking = state.enabled;
-    // _isStarting은 어차피 우리가 "start 절차" 직접 제어하므로, 여기선 특별히 false로 둬도 됨.
     _isStarting = false;
   }
 
   /// ------------------------------------------------------------
   /// 백그라운드 위치 추적 시작
   Future<void> startBackgroundGeolocation() async {
-
-    // [NEW] 혹시 플러그인 자체가 이미 실행 중인지 확인.
+    // [NEW] 혹시 플러그인 자체가 이미 실행 중인지 확인
     await syncStateFromPlugin();
 
     // (1) 만약 이미 시작 중이거나 이미 tracking 중이면 return
@@ -36,31 +96,30 @@ class LocationService {
     }
     _isStarting = true;
 
-    // (기타 onMotionChange, onProviderChange 등 생략)
+    // (2) ActivityChange 리스너 초기화
+    await _initActivityChangeListener();
 
-    // (2) ready
+    // (3) ready
     await bg.BackgroundGeolocation.ready(
       bg.Config(
-        // 기존 코드
         disableLocationAuthorizationAlert: true,
         desiredAccuracy: bg.Config.DESIRED_ACCURACY_HIGH,
-        distanceFilter: 3.0,
+        distanceFilter: 3.0,  // 초기값(걸음 기준)
         stopTimeout: 60,
         logLevel: bg.Config.LOG_LEVEL_VERBOSE,
         debug: true,
 
-        // 2) 추가 옵션
-        stopOnTerminate: true,      // 앱이 Terminate되면 추적중지 (원하시는 대로)
-        startOnBoot: false,         // 기기 재부팅 시 자동시작 X (원하시는 대로)
-        disableStopDetection: true, // 정지 감지 비활성화 -> 움직임이 없어도 계속 추적
-        stopOnStationary: false,    // stationary 상태여도 멈추지 말 것
+        stopOnTerminate: true,
+        startOnBoot: false,
+        disableStopDetection: true,
+        stopOnStationary: false,
       ),
     );
 
-    // (3) 실제 start
+    // (4) 실제 start
     await bg.BackgroundGeolocation.start();
-    await bg.BackgroundGeolocation.changePace(true); //이동상태 강제전환
-    // 완료
+    await bg.BackgroundGeolocation.changePace(true); // 이동상태 강제전환
+
     _isTracking = true;
     _isStarting = false;
   }
@@ -68,14 +127,14 @@ class LocationService {
   /// ------------------------------------------------------------
   /// 백그라운드 위치 추적 중지
   Future<void> stopBackgroundGeolocation() async {
-    // 혹시 아직 시작도 안 했다면 skip
     if (!_isTracking) return;
-
     await bg.BackgroundGeolocation.stop();
     _isTracking = false;
   }
 
-  /// 칼만필터 lat/lon, altitude(융합 or raw), accuracy
+  /// ------------------------------------------------------------
+  /// Hive 저장 로직 (EKF lat/lon, altitude, accuracy)
+  /// ------------------------------------------------------------
   void maybeSavePosition(LatLng pos, double alt, double acc) {
     if (lastSavedPosition == null) {
       _saveToHive(pos, alt, acc);
@@ -83,8 +142,11 @@ class LocationService {
       return;
     }
 
-    final dist = Distance().distance(lastSavedPosition!, pos);
-    if (dist >= 6.0) {
+    // (A) 이전 위치와 거리 계산
+    final dist = Distance().distance(lastSavedPosition!, pos); // meter
+
+    // (B) "활동 상태별"로 동적 결정된 _hiveDistanceFilter 사용
+    if (dist >= _hiveDistanceFilter) {
       _saveToHive(pos, alt, acc);
       lastSavedPosition = pos;
     }
@@ -93,11 +155,11 @@ class LocationService {
   void _saveToHive(LatLng pos, double alt, double acc) {
     locationBox.add(
       LocationData(
-        latitude: pos.latitude,   // ← EKF lat
-        longitude: pos.longitude, // ← EKF lon
-        altitude: alt,            // ← fusedAlt (or raw alt)
-        timestamp: DateTime.now(),     // ← 저장 시각
-        accuracy: acc,            // ← EKF 추정치 or raw gps accuracy
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+        altitude: alt,
+        timestamp: DateTime.now(),
+        accuracy: acc,
       ),
     );
   }

@@ -28,8 +28,6 @@ class MovementService {
   /// (A)변수 선언부
   // ---------------------------------------------------
 
-  final List<Triple> _recentPositions = [];  // 최근 K개 위치(위도/경도/고도)를 담는 리스트 (old -> new 순)
-  final int _maxPositions = 5; // 최대 5개만 유지
 
   // GPS 데이터(등)를 무시할지 결정하는 플래그
 //  - 초기에는 true (데이터 수집 전 or 카운트다운 대기)
@@ -351,7 +349,6 @@ class MovementService {
     _distanceFromHiveKm = 0.0;
     _cumulativeElevationHive = 0.0;
     _cumulativeDescentHive = 0.0;
-    _recentPositions.clear();
     _baseAltitude = null;
     pauseStopwatch();
     resetStopwatch();
@@ -378,13 +375,6 @@ class MovementService {
     if (isOutlier(loc)) {
       return (null, null, null); // 이상치면 저장 안 함
     }
-
-    // (A) 이상치가 아니라고 판단되면 → recentPositions 큐에 추가
-    final newLat = loc.coords.latitude;
-    final newLon = loc.coords.longitude;
-    final newAlt = loc.coords.altitude;
-    final tsMs = _parseTimestamp(loc.timestamp) ?? DateTime.now().millisecondsSinceEpoch;
-    _addRecentPosition(newLat, newLon, newAlt, tsMs);
 
 
      final result = _applyRawGPS(loc);
@@ -439,24 +429,8 @@ class MovementService {
     if (legacyOutlierCheck(loc)) {
       return true;
     }
-    // (B) 그 다음 medianOutlierCheck()
-    if (medianOutlierCheck(loc)) {
-      return true;
-    }
     // 두 함수 모두 false면 → Outlier 아님
     return false;
-  }
-
-  // outlier 새로운 점 추가 헬퍼 메서드
-  void _addRecentPosition(double lat, double lon, double alt, int timestampMs) {
-    // (1) 새 Triple
-    final t = Triple(lat, lon, alt, timestampMs);
-    // (2) 리스트에 추가
-    _recentPositions.add(t);
-    // (3) 최대 개수를 초과하면 가장 오래된 것 제거
-    if (_recentPositions.length > _maxPositions) {
-      _recentPositions.removeAt(0);
-    }
   }
 
   /// 단발성 이상치 검사
@@ -465,7 +439,7 @@ class MovementService {
       return false;
     }
 
-    final nowMs = _parseTimestamp(loc.timestamp) ?? DateTime.now().millisecondsSinceEpoch;
+    /*final nowMs = _parseTimestamp(loc.timestamp) ?? DateTime.now().millisecondsSinceEpoch;
     final dtMs = nowMs - _lastTimestampMs!;
     if (dtMs <= 0) {
       return false;
@@ -475,11 +449,8 @@ class MovementService {
     // (A) 고도 차
     final altDiff = (loc.coords.altitude - _lastAltitude!).abs();
 
-    // "초당 고도차" 또는 "분당 고도차"로 환산
-    // 예: 10초 동안 altDiff=30 → 초당 3.0m → 이거 사람이 걷기/달리기로는 말이 안 된다면 Outlier
     final altChangePerSec = altDiff / dtSec;
     if (altChangePerSec > 10.0) {
-      // (예: 초당 3m 이상 상승은 말도 안된다 => 임의수치)
       return true;
     }
 
@@ -491,90 +462,9 @@ class MovementService {
     // 예: 시속 50km/h 초과
     if (speedKmh > 130.0) {
       return true;
-    }
+    }*/
 
     return false;
-  }
-
-  /// 평균이동법 이상치 검사
-  bool medianOutlierCheck(bg.Location loc) {
-    // (1) 최근 위치가 충분치 않으면 검사 불가능
-    if (_recentPositions.length < 3) {
-      return false;
-    }
-
-    // (2) 새 위치 시간/좌표
-    final nowMs = _parseTimestamp(loc.timestamp) ?? DateTime.now().millisecondsSinceEpoch;
-    final newLatLng = LatLng(loc.coords.latitude, loc.coords.longitude);
-    final newAlt = loc.coords.altitude;
-
-    // (3) 먼저, “최근 위치들”의 속도를 각각 구해서 speed list를 만든다.
-    //     예) [3.1, 4.5, 3.9, 10.2, ...] (km/h 단위)
-    final List<double> recentSpeeds = [];
-    for (int i = 0; i < _recentPositions.length - 1; i++) {
-      final A = _recentPositions[i];
-      final B = _recentPositions[i + 1];
-      final dtSec = (B.timestampMs - A.timestampMs) / 1000.0;
-      if (dtSec <= 0) continue;
-
-      final distMeter = Distance().distance(LatLng(A.lat, A.lon), LatLng(B.lat, B.lon));
-      final speedKmh = (distMeter / dtSec) * 3.6;
-      recentSpeeds.add(speedKmh);
-    }
-
-    // (3-1) speeds가 비어있으면 pass
-    if (recentSpeeds.isEmpty) return false;
-
-    // (4) recentSpeeds의 "중앙값" (또는 평균) 구하기
-    //     예시는 중앙값(median) 함수로 구한다고 가정
-    final double medianSpeed = _computeMedian(recentSpeeds);
-
-    // (5) 최근 위치들의 alt만 뽑아서 altMedian(또는 avg) 구하기
-    final List<double> altList = _recentPositions.map((e) => e.alt).toList();
-    final double altMedian = _computeMedian(altList);
-
-    // (6) 새 위치 속도/고도와 medianSpeed/altMedian 비교
-
-    // 6-1) 새 위치 speed(최근 마지막 점과만 비교)
-    final lastTriple = _recentPositions.last;
-    final dtSec2 = (nowMs - lastTriple.timestampMs) / 1000.0;
-    double speedKmhNew = 0.0;
-    if (dtSec2 > 0) {
-      final distM = Distance().distance(LatLng(lastTriple.lat, lastTriple.lon), newLatLng);
-      speedKmhNew = (distM / dtSec2) * 3.6;
-    }
-
-    // 6-2) "medianSpeed 대비 편차"가 너무 큰지
-    if (medianSpeed > 0) {
-      if (speedKmhNew > medianSpeed * 1.5) {
-        return true;
-      }
-    }
-
-    // 6-3) alt 편차가 너무 큰지
-    final altDiff = (newAlt - altMedian).abs();
-    if (altDiff > 30) {
-      return true;
-    }
-
-    // 여기선 예시로 3배, 200m 차이를 썼지만,
-    // 실제론 운동 패턴에 따라 값 조정 필요
-
-    return false;
-  }
-
-  // 중앙값 구하는 헬퍼 함수
-  double _computeMedian(List<double> values) {
-    if (values.isEmpty) return 0.0;
-    final sorted = [...values]..sort();
-    final mid = sorted.length ~/ 2;
-    if (sorted.length.isOdd) {
-      // 홀수개
-      return sorted[mid];
-    } else {
-      // 짝수개 → 중간 2개 평균
-      return (sorted[mid - 1] + sorted[mid]) / 2.0;
-    }
   }
 
   /// Location timestamp 파싱 (int or String)
