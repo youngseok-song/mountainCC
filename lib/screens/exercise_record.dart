@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'dart:math' as math;
 
 import 'package:latlong2/latlong.dart' as latlng;  // Distance 계산용
 
@@ -48,6 +47,22 @@ class SummaryScreen extends StatefulWidget {
 
   @override
   State<SummaryScreen> createState() => _SummaryScreenState();
+}
+
+class LapData {
+  final double distanceKm;       // 이 랩이 몇 km 지점
+  final Duration lapDuration;    // 그 지점까지 걸린 총 시간
+  final double avgSpeedKmh;
+  final String paceString;
+  final double cumulativeAscent;
+
+  LapData({
+    required this.distanceKm,
+    required this.lapDuration,
+    required this.avgSpeedKmh,
+    required this.paceString,
+    required this.cumulativeAscent,
+  });
 }
 
 class _SummaryScreenState extends State<SummaryScreen>
@@ -538,7 +553,7 @@ class _SummaryScreenState extends State<SummaryScreen>
                 tabs: const [
                   Tab(text: "운동 기록 요약"),
                   Tab(text: "운동 기록 상세"),
-                  Tab(text: "HIVE 기록"),
+                  Tab(text: "랩 통계"),
                 ],
               ),
             ),
@@ -550,7 +565,7 @@ class _SummaryScreenState extends State<SummaryScreen>
                 children: [
                   _buildRecordSummaryTab(),
                   _buildRecordDetailTab(),
-                  _buildHiveListTab(),
+                  _buildLapStatsTab(),
                 ],
               ),
             ),
@@ -648,6 +663,181 @@ class _SummaryScreenState extends State<SummaryScreen>
         );
       },
     );
+  }
+
+
+  Widget _buildLapStatsTab() {
+    final box = Hive.box<LocationData>('locationBox');
+    final locs = box.values.toList();
+
+    if (locs.isEmpty) {
+      return const Center(child: Text("저장된 위치데이터가 없습니다."));
+    }
+
+    // 1) 시간 순 정렬
+    locs.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    // 2) 랩 리스트 생성
+    final laps = _makeLapList(locs);
+
+    return ListView.separated(
+      itemCount: laps.length,
+      // (A) 각 랩 표시
+      itemBuilder: (context, index) {
+        final lap = laps[index];
+
+        final distStr = "${lap.distanceKm.toStringAsFixed(2)} km";
+        final durStr  = _formatDuration(lap.lapDuration);
+        final speedStr= "${lap.avgSpeedKmh.toStringAsFixed(2)} km/h";
+        final paceStr = lap.paceString;
+        final ascentStr = "${lap.cumulativeAscent.toStringAsFixed(2)} m";
+
+        return ListTile(
+          leading: Text("${index + 1} 랩"),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              Expanded(child: Text(distStr)),
+              Expanded(child: Text(durStr)),
+              Expanded(child: Text(speedStr)),
+              Expanded(child: Text(paceStr)),
+              Expanded(child: Text(ascentStr)),
+            ],
+          ),
+        );
+      },
+      // (B) 랩과 랩 사이 구분자(Separator) 위젯
+      separatorBuilder: (context, index) {
+        return Column(
+          children: const [
+            SizedBox(height: 5),
+            // 얇은 가로선
+            Divider(
+              thickness: 1,       // 선 두께
+              color: Color(0xFFDADADA), // 선 색상(원하는 컬러)
+            ),
+            SizedBox(height: 5),
+          ],
+        );
+      },
+    );
+  }
+
+
+  List<LapData> _makeLapList(List<LocationData> locs) {
+    // (A) 준비
+    final distanceCalc = Distance();
+    List<LapData> result = [];
+
+    // 누적거리, 누적상승고도, etc.
+    double cumulativeDist = 0.0;
+    double cumulativeAscent = 0.0;
+
+    // (B) 시작 시점(= 첫 위치)
+    final startTime = locs.first.timestamp;
+    DateTime prevTime = startTime;
+    LatLng prevLatLng = LatLng(locs.first.latitude, locs.first.longitude);
+    double prevAlt = locs.first.altitude;
+
+    // “다음 랩 km” (1.0, 2.0, 3.0…)
+    double nextLapTarget = 1.0;
+
+    // (C) 첫 Lap: 0km
+    result.add(
+      LapData(
+        distanceKm: 0.0,
+        lapDuration: Duration.zero,
+        avgSpeedKmh: 0.0,
+        paceString: "--'--\"",
+        cumulativeAscent: 0.0,
+      ),
+    );
+
+    for (int i = 1; i < locs.length; i++) {
+      final current = locs[i];
+      final curLatLng = LatLng(current.latitude, current.longitude);
+
+      final distMeter = distanceCalc(prevLatLng, curLatLng);
+      final distKm = distMeter / 1000.0;
+
+      cumulativeDist += distKm;
+
+      // 상승고도 계산
+      final altDiff = current.altitude - prevAlt;
+      if (altDiff > 0) {
+        cumulativeAscent += altDiff;
+      }
+
+      final nowTime = current.timestamp;
+
+      // 만약 cumulativeDist >= nextLapTarget => 랩 생성
+      while (cumulativeDist >= nextLapTarget) {
+        // 랩 지점 = nextLapTarget
+        final lapDist = nextLapTarget;
+        // 경과시간 = nowTime - startTime
+        final dur = nowTime.difference(startTime);
+
+        // 평균속도 = lapDist / (dur.inSeconds/3600)
+        final hours = dur.inSeconds / 3600.0;
+        double speedKmh = 0.0;
+        if (hours > 0 && lapDist>0) {
+          speedKmh = lapDist / hours;
+        }
+
+        // 페이스
+        final paceStr = _formatPace( (dur.inSeconds/60.0) / lapDist );
+
+        result.add(
+          LapData(
+            distanceKm: lapDist,
+            lapDuration: dur,
+            avgSpeedKmh: speedKmh,
+            paceString: paceStr,
+            cumulativeAscent: cumulativeAscent,
+          ),
+        );
+
+        nextLapTarget += 1.0; // 다음 랩(1km씩 증가)
+      }
+
+      // 갱신
+      prevLatLng = curLatLng;
+      prevAlt = current.altitude;
+      prevTime = nowTime;
+    }
+
+    // (D) 마지막 leftover
+    if (cumulativeDist % 1.0 != 0.0) {
+      // 예: 5.35 → leftover=5.35
+      final leftover = cumulativeDist;
+      final endTime = locs.last.timestamp;
+      final dur = endTime.difference(startTime);
+
+      double speedKmh = 0.0;
+      final hours = dur.inSeconds / 3600.0;
+      if (hours>0 && leftover>0) {
+        speedKmh = leftover / hours;
+      }
+      final paceStr = _formatPace( (dur.inSeconds/60.0)/ leftover );
+
+      result.add(
+        LapData(
+          distanceKm: leftover,
+          lapDuration: dur,
+          avgSpeedKmh: speedKmh,
+          paceString: paceStr,
+          cumulativeAscent: cumulativeAscent,
+        ),
+      );
+    }
+
+    return result;
+  }
+
+  String _formatDuration(Duration d) {
+    final hh = d.inHours.toString().padLeft(2, '0');
+    final mm = (d.inMinutes % 60).toString().padLeft(2, '0');
+    final ss = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return "$hh:$mm:$ss";
   }
 
   // -----------------------------------------------
@@ -793,7 +983,16 @@ class _SummaryScreenState extends State<SummaryScreen>
             _buildStackedPaceChart(),
             SizedBox(height:10),
             _buildPaceSummary(),
-            const SizedBox(height: 30),
+
+
+            // (A) 가로선 추가
+            SizedBox(height: 20),  // 그래프-선 사이 여백
+            Container(
+              width: double.infinity,
+              height: 1,
+              color: Colors.grey[300],
+            ),
+            SizedBox(height: 20),  // 선-다음 그래프 사이 여백
 
             // 2) 고도
             const Text("고도", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -802,6 +1001,17 @@ class _SummaryScreenState extends State<SummaryScreen>
             SizedBox(height:10),
             _buildAltitudeSummary(),
             const SizedBox(height: 30),
+
+
+            // (A) 가로선 추가
+            SizedBox(height: 20),  // 그래프-선 사이 여백
+            Container(
+              width: double.infinity,
+              height: 1,
+              color: Colors.grey[300],
+            ),
+            SizedBox(height: 20),  // 선-다음 그래프 사이 여백
+
 
             // 3) 속도
             const Text("속도", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -1056,6 +1266,7 @@ class _SummaryScreenState extends State<SummaryScreen>
     return SizedBox(
       height: 200,
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
           Positioned.fill(
             child: _buildLineChart(
@@ -1070,7 +1281,7 @@ class _SummaryScreenState extends State<SummaryScreen>
 
           // 왼상단
           Positioned(
-            top: -8,    // 살짝 아래로 내려서 여백
+            top: 0,    // 살짝 아래로 내려서 여백
             left: 12,  // 살짝 오른쪽으로 띄워서 (기기별로 조정 가능)
             child: Text(
               "min/km",
@@ -1080,7 +1291,7 @@ class _SummaryScreenState extends State<SummaryScreen>
 
           // 오른하단
           Positioned(
-            right: -12,
+            right: 12,
             bottom: 8,
             child: Text(
               "km",
@@ -1100,6 +1311,7 @@ class _SummaryScreenState extends State<SummaryScreen>
     return SizedBox(
       height: 200,
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
           // (A) 차트 자체를 전체에 fill
           Positioned.fill(
@@ -1116,14 +1328,14 @@ class _SummaryScreenState extends State<SummaryScreen>
           // (B) 왼쪽 위 => "m" (수직 회전)
           // (B) 왼쪽 축 라벨: "m"
           Positioned(
-            top: -8,
+            top: 0,
             left: 12,
             child: Text("m"),      // y축 라벨
           ),
 
           // (C) 아래 축 라벨: "km"
           Positioned(
-            right: -12,
+            right: 12,
             bottom: 8,
             child: Text("km"),     // x축 라벨
           ),
@@ -1134,10 +1346,10 @@ class _SummaryScreenState extends State<SummaryScreen>
 
 // 속도 차트
   Widget _buildStackedSpeedChart() {
-
     return SizedBox(
       height: 200,
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
           // (A) 차트
           Positioned.fill(
@@ -1152,14 +1364,14 @@ class _SummaryScreenState extends State<SummaryScreen>
 
           // (B) 왼쪽 위 => "km/h" (수직 회전)
           Positioned(
-            top: -8,
+            top: 0,
             left: 12,
-            child: Text("m"),      // y축 라벨
+            child: Text("km/h"),      // y축 라벨
           ),
 
           // (C) 아래 축 라벨: "km"
           Positioned(
-            right: -12,
+            right: 12,
             bottom: 8,
             child: Text("km"),     // x축 라벨
           ),
@@ -1326,8 +1538,7 @@ Widget _buildLineChart({
 
         // (2) minY, maxY: 이미 spots가 변환되어 왔으므로, 그대로 사용
         minY: minY,
-        maxY: maxY,
-
+        maxY: maxY * 1.2,
         gridData: FlGridData(
           show: true,
           drawVerticalLine: true,
@@ -1366,7 +1577,7 @@ Widget _buildLineChart({
             sideTitles: SideTitles(
               showTitles: true,
               interval: yInterval,
-              reservedSize: 30.0,
+              reservedSize: 40.0,
               getTitlesWidget: (value, meta) {
                 // 최댓값 라벨은 숨김
                 if (meta.max == value) {
