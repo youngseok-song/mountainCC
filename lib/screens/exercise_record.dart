@@ -5,7 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
-import 'package:latlong2/latlong.dart' as latLng;  // Distance 계산용
+import 'package:latlong2/latlong.dart' as latlng;  // Distance 계산용
 
 // Hive, GPX 관련 임포트
 import 'package:hive/hive.dart';
@@ -84,6 +84,8 @@ class _SummaryScreenState extends State<SummaryScreen>
   bool _isLoading = true;   // 로딩 상태
   bool _mapReady = false;   // 지도 준비 여부
   bool _forceUpdate = false;// 타일 리로드용
+
+
 
   @override
   void initState() {
@@ -567,7 +569,7 @@ class _SummaryScreenState extends State<SummaryScreen>
     }
 
     // (1) Distance 계산 객체 (latlong2) 준비
-    final distanceCalc = latLng.Distance();
+    final distanceCalc = latlng.Distance();
 
     // (2) 새 리스트를 만들어, 각 index별로 [위도/경도/고도/시간/이동거리/시간차/속도] 등 보관
     //     예) List<RichLocation> 처럼 커스텀 클래스나, Map<String, dynamic> 사용 가능
@@ -586,8 +588,8 @@ class _SummaryScreenState extends State<SummaryScreen>
       if (prev != null) {
         // (a) 수평 거리 계산
         distMeter = distanceCalc(
-          latLng.LatLng(prev.latitude, prev.longitude),
-          latLng.LatLng(current.latitude, current.longitude),
+          latlng.LatLng(prev.latitude, prev.longitude),
+          latlng.LatLng(current.latitude, current.longitude),
         );
         // (b) 시간차(초)
         dtSec = current.timestamp.difference(prev.timestamp).inSeconds;
@@ -1035,11 +1037,30 @@ class _SummaryScreenState extends State<SummaryScreen>
 
 // 페이스 차트
   Widget _buildPaceChart() {
+    // (1) _minPace, _maxPace는 이미 _generateChartData()에서 계산됨
+    //     예: _minPace = 3.0, _maxPace = 33.0
+    final offset = _maxPace; // 33.0 (느린 페이스)
+
+    // (2) reversedSpots: y = offset - originalY
+    //     즉, 33 - pace => pace=33 => 0, pace=3 => 30
+    final reversedSpots = _paceSpots.map((spot) {
+      final reversedY = offset - spot.y;
+      return FlSpot(spot.x, reversedY);
+    }).toList();
+
+    // (3) 이 reversedSpots의 minY= 0, maxY= (33 - 3)=30
+    //     (실제 함수를 호출하면 내부에서 계산)
+    // (4) y축 라벨은 getTitlesWidget에서 offsetValue - value로 다시 pace로 복원하여 표시
+
     return _buildLineChart(
-      spots: _paceSpots,
+      spots: reversedSpots,
       color: Colors.purple,
-      unitY: "",  // 혹은 "min/km" 라벨 단위
+      unitY: "'",
       noDataText: "페이스 데이터가 없습니다.",
+      isReversed: true,     // <<--- 새로 추가
+      offsetValue: offset,  // <<--- 새로 추가
+      leftAxisName: "min/km",
+      bottomAxisName: "km",
     );
   }
 
@@ -1050,6 +1071,8 @@ class _SummaryScreenState extends State<SummaryScreen>
       color: Colors.orange,
       unitY: "",
       noDataText: "고도 데이터가 없습니다.",
+      leftAxisName: "m",
+      bottomAxisName: "km",
     );
   }
 
@@ -1060,6 +1083,8 @@ class _SummaryScreenState extends State<SummaryScreen>
       color: Colors.redAccent,
       unitY: "",
       noDataText: "속도 데이터가 없습니다.",
+      leftAxisName: "km/h",
+      bottomAxisName: "km",
     );
   }
 
@@ -1070,19 +1095,35 @@ class _SummaryScreenState extends State<SummaryScreen>
     required String rightValue,
   }) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      mainAxisAlignment: MainAxisAlignment.center, // 전체 Row를 수평 중앙 정렬
       children: [
-        Column(
-          children: [
-            Text(leftTitle),
-            Text(leftValue),
-          ],
+        // 왼쪽 영역
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center, // 세로축에서도 중앙
+            children: [
+              Text(leftTitle, style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(leftValue, style: const TextStyle(fontSize: 16)),
+            ],
+          ),
         ),
-        Column(
-          children: [
-            Text(rightTitle),
-            Text(rightValue),
-          ],
+
+        // 가운데 세로선 (얇은 라인)
+        Container(
+          width: 1,
+          height: 40,
+          color: Colors.grey[300],
+        ),
+
+        // 오른쪽 영역
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(rightTitle, style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(rightValue, style: const TextStyle(fontSize: 16)),
+            ],
+          ),
         ),
       ],
     );
@@ -1150,31 +1191,34 @@ class _SummaryScreenState extends State<SummaryScreen>
 Widget _buildLineChart({
   required List<FlSpot> spots,
   required Color color,
-  String unitY = "",           // Y축 라벨 단위
+  String unitY = "",        // Y축 라벨 단위
   String? noDataText,
+  bool isReversed = false,  // <<--- 새로 추가
+  double? offsetValue,      // <<--- 새로 추가 (역순 변환 시 사용)
+  String? leftAxisName,    // 왼쪽 축 이름(단위)
+  String? bottomAxisName,  // 아래 축 이름(단위)
 }) {
-  // (A) 스팟이 비어있으면 "데이터 없음" 메시지
+  // (A) 스팟이 비어있으면 "데이터 없음" 표시
   if (spots.isEmpty) {
     return Center(child: Text(noDataText ?? "데이터가 없습니다."));
   }
 
   // (B) X축 범위: [0, maxX]
   final double maxX = spots.map((e) => e.x).reduce((a, b) => a > b ? a : b);
-  final double minX = 0.0; // 요구사항: X축 시작은 0
+  final double minX = 0.0;
 
-  // X축 간격 (interval)
-  // => (maxX - 0) / 10
+  // X축 간격
   double xRange = maxX - minX;
   double xInterval = xRange > 0 ? xRange / 10 : 1.0;
-  // (총 거리가 0이거나 매우 작으면 1로 fallback)
 
-  // (C) Y축 범위: [0, maxY]
+  // (C) Y축 범위
+  // - isReversed=false → 0..maxY
+  // - isReversed=true  → 0..(offsetValue - minPace), etc (이미 변환된 spots를 쓴다면 단순 계산)
   final double maxY = spots.map((e) => e.y).reduce((a, b) => a > b ? a : b);
-  final double minY = 0.0; // 요구사항: Y축 시작은 0
+  final double minY = spots.map((e) => e.y).reduce((a, b) => a < b ? a : b);
 
-  double yRange = maxY - minY;
+  double yRange = (maxY - minY).abs();
   double yInterval = yRange > 0 ? yRange / 5 : 1.0;
-  // (최대값이 0이거나 매우 작으면 1로 fallback)
 
   // (D) 차트에 표시할 라인
   final lineBarData = LineChartBarData(
@@ -1189,19 +1233,41 @@ Widget _buildLineChart({
     ),
   );
 
-  // (E) 최종 LineChart 반환
   return SizedBox(
     height: 200,
     child: LineChart(
       LineChartData(
-        // (1) X/Y 범위
+        // (1) minX/maxX: 그대로
         minX: minX,
         maxX: maxX,
+
+        // (2) minY, maxY: 이미 spots가 변환되어 왔으므로, 그대로 사용
         minY: minY,
         maxY: maxY,
 
-        // (2) 축/그리드 설정
-        gridData: FlGridData(show: true),
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: true,
+          drawHorizontalLine: true,
+
+          // X축 점선 간격
+          verticalInterval: xInterval,
+
+          // Y축 점선 간격
+          horizontalInterval: yInterval,
+
+          // (B) 점선 스타일
+          getDrawingHorizontalLine: (value) => FlLine(
+            color: Colors.grey,
+            strokeWidth: 0.5,
+            dashArray: [4,4],  // 4픽셀 점선, 4픽셀 공백
+          ),
+          getDrawingVerticalLine: (value) => FlLine(
+            color: Colors.grey,
+            strokeWidth: 0.5,
+            dashArray: [4,4],
+          ),
+        ),
         borderData: FlBorderData(
           show: true,
           border: const Border(
@@ -1213,31 +1279,42 @@ Widget _buildLineChart({
         ),
         titlesData: FlTitlesData(
           leftTitles: AxisTitles(
+            /// (축 이름)
+            axisNameWidget: leftAxisName != null ? Text(leftAxisName) : null,
+            axisNameSize: leftAxisName != null ? 20 : 0,
             sideTitles: SideTitles(
               showTitles: true,
-              interval: yInterval,  // ← 동적 계산
-              reservedSize: 60.0,
+              interval: yInterval,
+              reservedSize: 5.0,
               getTitlesWidget: (value, meta) {
-                // Y축 라벨 (ex: "100 m", "10 km/h", etc.)
-                // 최댓값 라벨을 숨기고 싶다면 아래처럼 처리하거나 주석처리
-                if (value == meta.max) {
+                // (E) isReversed => 라벨 변환
+                if (meta.max == value) {
                   return const SizedBox.shrink();
                 }
-                final label = value.toStringAsFixed(1);
-                return Text("$label$unitY", style: const TextStyle(fontSize: 12));
+
+                double displayVal = value;
+                if (isReversed && offsetValue != null) {
+                  // 역변환: pace = offsetValue - value
+                  displayVal = offsetValue - value;
+                }
+
+                final label = displayVal.toStringAsFixed(1) + unitY;
+                return Text(label, style: const TextStyle(fontSize: 12));
               },
             ),
           ),
           bottomTitles: AxisTitles(
+            axisNameWidget: bottomAxisName != null ? Text(bottomAxisName) : null,
+            axisNameSize: bottomAxisName != null ? 20 : 0,
             sideTitles: SideTitles(
               showTitles: true,
-              interval: xInterval, // ← 동적 계산
+              interval: xInterval,
               getTitlesWidget: (value, meta) {
-                // X축 라벨 (distance in km)
+                // X축 라벨
                 if (value == meta.max) {
                   return const SizedBox.shrink();
                 }
-                return Text("${value.toStringAsFixed(1)}",
+                return Text(value.toStringAsFixed(1),
                     style: const TextStyle(fontSize: 12));
               },
             ),
@@ -1249,8 +1326,6 @@ Widget _buildLineChart({
             sideTitles: SideTitles(showTitles: false),
           ),
         ),
-
-        // (3) 실제 라인 데이터
         lineBarsData: [lineBarData],
       ),
     ),
