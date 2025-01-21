@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'dart:math' as math;
 
 import 'package:latlong2/latlong.dart' as latlng;  // Distance 계산용
 
@@ -785,23 +786,26 @@ class _SummaryScreenState extends State<SummaryScreen>
         child: Column(
           children: [
             // 1) 페이스
-            const Text("페이스", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             SizedBox(height:20),
-            _buildPaceChart(),
+            const Text("페이스", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            SizedBox(height:10),
+            _buildStackedPaceChart(),
             SizedBox(height:10),
             _buildPaceSummary(),
             const SizedBox(height: 30),
 
             // 2) 고도
             const Text("고도", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            _buildAltitudeChart(),
+            SizedBox(height:10),
+            _buildStackedAltitudeChart(),
             SizedBox(height:10),
             _buildAltitudeSummary(),
             const SizedBox(height: 30),
 
             // 3) 속도
             const Text("속도", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            _buildSpeedChart(),
+            SizedBox(height:10),
+            _buildStackedSpeedChart(),
             SizedBox(height:10),
             _buildSpeedSummary(),
             const SizedBox(height: 30),
@@ -1040,55 +1044,145 @@ class _SummaryScreenState extends State<SummaryScreen>
   }
 
 // 페이스 차트
-  Widget _buildPaceChart() {
-    // (1) _minPace, _maxPace는 이미 _generateChartData()에서 계산됨
-    //     예: _minPace = 3.0, _maxPace = 33.0
-    final offset = _maxPace; // 33.0 (느린 페이스)
-
-    // (2) reversedSpots: y = offset - originalY
-    //     즉, 33 - pace => pace=33 => 0, pace=3 => 30
+  Widget _buildStackedPaceChart() {
+    // 1) reversedSpots 계산
+    final offset = _maxPace; // ex) 33
     final reversedSpots = _paceSpots.map((spot) {
       final reversedY = offset - spot.y;
       return FlSpot(spot.x, reversedY);
     }).toList();
 
-    // (3) 이 reversedSpots의 minY= 0, maxY= (33 - 3)=30
-    //     (실제 함수를 호출하면 내부에서 계산)
-    // (4) y축 라벨은 getTitlesWidget에서 offsetValue - value로 다시 pace로 복원하여 표시
+    return SizedBox(
+      height: 200,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: _buildLineChart(
+              spots: reversedSpots,
+              color: Colors.purple,
+              noDataText: "페이스 데이터가 없습니다.",
+              isReversed: true,
+              offsetValue: offset,
+            ),
+          ),
 
-    return _buildLineChart(
-      spots: reversedSpots,
-      color: Colors.purple,
-      unitY: "'",
-      noDataText: "페이스 데이터가 없습니다.",
-      isReversed: true,     // <<--- 새로 추가
-      offsetValue: offset,  // <<--- 새로 추가
-      leftAxisName: "min/km",
-      bottomAxisName: "km",
+          // 왼상단
+          Positioned(
+            left: 0,
+            top: 0,
+            child: Transform.rotate(
+              angle: -math.pi / 2,
+              child: const Text(
+                "min/km",
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ),
+
+          // 오른하단
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: const Text(
+              "km",
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
 // 고도 차트
-  Widget _buildAltitudeChart() {
-    return _buildLineChart(
-      spots: _altSpots,
-      color: Colors.orange,
-      unitY: "",
-      noDataText: "고도 데이터가 없습니다.",
-      leftAxisName: "m",
-      bottomAxisName: "km",
+  Widget _buildStackedAltitudeChart() {
+    // 1) spots 준비: 그냥 _altSpots를 그대로 사용 (고도 그래프는 reversed 필요 없음)
+    final spots = _altSpots;
+
+    // 2) 실제 차트는 _buildLineChart로
+    //    unitY, leftAxisName 이런건 안 써도 됨(축 이름은 Stack으로 배치)
+    return SizedBox(
+      height: 200,
+      child: Stack(
+        children: [
+          // (A) 차트 자체를 전체에 fill
+          Positioned.fill(
+            child: _buildLineChart(
+              spots: spots,
+              color: Colors.orange,
+              noDataText: "고도 데이터가 없습니다.",
+              // isReversed: false,
+            ),
+          ),
+
+          // (B) 왼쪽 위 => "m" (수직 회전)
+          Positioned(
+            left: 0,
+            top: 0,
+            child: Transform.rotate(
+              angle: -math.pi / 2,
+              child: const Text(
+                "m",
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ),
+
+          // (C) 오른쪽 아래 => "km"
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: const Text(
+              "km",
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
 // 속도 차트
-  Widget _buildSpeedChart() {
-    return _buildLineChart(
-      spots: _speedSpots,
-      color: Colors.redAccent,
-      unitY: "",
-      noDataText: "속도 데이터가 없습니다.",
-      leftAxisName: "km/h",
-      bottomAxisName: "km",
+  Widget _buildStackedSpeedChart() {
+    final spots = _speedSpots;
+    // 속도 그래프는 보통 reversed 불필요
+
+    return SizedBox(
+      height: 200,
+      child: Stack(
+        children: [
+          // (A) 차트
+          Positioned.fill(
+            child: _buildLineChart(
+              spots: spots,
+              color: Colors.redAccent,
+              noDataText: "속도 데이터가 없습니다.",
+            ),
+          ),
+
+          // (B) 왼쪽 위 => "km/h" (수직 회전)
+          Positioned(
+            left: 0,
+            top: 0,
+            child: Transform.rotate(
+              angle: -math.pi / 2,
+              child: const Text(
+                "km/h",
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ),
+
+          // (C) 오른쪽 아래 => "km"
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: const Text(
+              "km",
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1166,13 +1260,7 @@ class _SummaryScreenState extends State<SummaryScreen>
     );
   }
 
-// pace를 "분'초\"" 형태로
-  String _formatPace(double pace) {
-    if (pace <= 0) return "--'--\"";
-    final minPart = pace.floor();
-    final secPart = ((pace - minPart) * 60).round();
-    return "$minPart'${secPart.toString().padLeft(2, '0')}\"";
-  }
+
 
 
   Widget _buildValueCell(String text) {
@@ -1190,17 +1278,22 @@ class _SummaryScreenState extends State<SummaryScreen>
   }
 }
 
+// pace를 "분'초\"" 형태로
+String _formatPace(double pace) {
+  if (pace <= 0) return "--'--\"";
+  final minPart = pace.floor();
+  final secPart = ((pace - minPart) * 60).round();
+  return "$minPart'${secPart.toString().padLeft(2, '0')}\"";
+}
+
 
 /// 동적으로 X/Y 범위와 간격을 설정하는 LineChart
 Widget _buildLineChart({
   required List<FlSpot> spots,
   required Color color,
-  String unitY = "",        // Y축 라벨 단위
   String? noDataText,
   bool isReversed = false,  // <<--- 새로 추가
   double? offsetValue,      // <<--- 새로 추가 (역순 변환 시 사용)
-  String? leftAxisName,    // 왼쪽 축 이름(단위)
-  String? bottomAxisName,  // 아래 축 이름(단위)
 }) {
   // (A) 스팟이 비어있으면 "데이터 없음" 표시
   if (spots.isEmpty) {
@@ -1256,7 +1349,6 @@ Widget _buildLineChart({
 
           // X축 점선 간격
           verticalInterval: xInterval,
-
           // Y축 점선 간격
           horizontalInterval: yInterval,
 
@@ -1284,32 +1376,30 @@ Widget _buildLineChart({
         titlesData: FlTitlesData(
           leftTitles: AxisTitles(
             /// (축 이름)
-            axisNameWidget: leftAxisName != null ? Text(leftAxisName) : null,
-            axisNameSize: leftAxisName != null ? 20 : 0,
+            axisNameWidget: null,
             sideTitles: SideTitles(
               showTitles: true,
               interval: yInterval,
               reservedSize: 30.0,
               getTitlesWidget: (value, meta) {
-                // (E) isReversed => 라벨 변환
+                // 1) 최댓값 라벨 숨기기 (원하면 유지)
                 if (meta.max == value) {
                   return const SizedBox.shrink();
                 }
 
-                double displayVal = value;
+                // 2) 역변환 (isReversed)
+                double paceVal = value;
                 if (isReversed && offsetValue != null) {
-                  // 역변환: pace = offsetValue - value
-                  displayVal = offsetValue - value;
+                  paceVal = offsetValue - value;
                 }
 
-                final label = displayVal.toStringAsFixed(1) + unitY;
+                final label = _formatPace(paceVal);
                 return Text(label, style: const TextStyle(fontSize: 12));
               },
             ),
           ),
           bottomTitles: AxisTitles(
-            axisNameWidget: bottomAxisName != null ? Text(bottomAxisName) : null,
-            axisNameSize: bottomAxisName != null ? 20 : 0,
+            axisNameWidget: null,
             sideTitles: SideTitles(
               showTitles: true,
               interval: xInterval,
@@ -1335,3 +1425,4 @@ Widget _buildLineChart({
     ),
   );
 }
+
