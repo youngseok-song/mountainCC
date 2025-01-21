@@ -1070,7 +1070,7 @@ class _SummaryScreenState extends State<SummaryScreen>
 
           // 왼상단
           Positioned(
-            top: 8,    // 살짝 아래로 내려서 여백
+            top: -8,    // 살짝 아래로 내려서 여백
             left: 12,  // 살짝 오른쪽으로 띄워서 (기기별로 조정 가능)
             child: Text(
               "min/km",
@@ -1080,7 +1080,7 @@ class _SummaryScreenState extends State<SummaryScreen>
 
           // 오른하단
           Positioned(
-            right: 12,
+            right: -12,
             bottom: 8,
             child: Text(
               "km",
@@ -1116,27 +1116,16 @@ class _SummaryScreenState extends State<SummaryScreen>
           // (B) 왼쪽 위 => "m" (수직 회전)
           // (B) 왼쪽 축 라벨: "m"
           Positioned(
-            left: 12, // 조정
-            top: 0,
-            bottom: 0,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Transform.rotate(
-                angle: -math.pi / 2,
-                child: Text("m", style: TextStyle(fontSize:12)),
-              ),
-            ),
+            top: -8,
+            left: 12,
+            child: Text("m"),      // y축 라벨
           ),
 
           // (C) 아래 축 라벨: "km"
           Positioned(
-            left: 0,
-            right: 0,
-            bottom: 10,
-            child: Align(
-              alignment: Alignment.center,
-              child: Text("km", style: TextStyle(fontSize:12)),
-            ),
+            right: -12,
+            bottom: 8,
+            child: Text("km"),     // x축 라벨
           ),
         ],
       ),
@@ -1163,25 +1152,16 @@ class _SummaryScreenState extends State<SummaryScreen>
 
           // (B) 왼쪽 위 => "km/h" (수직 회전)
           Positioned(
-            left:12,
-            top:0,
-            bottom:0,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Transform.rotate(
-                angle:-math.pi /2,
-                child: Text("km/h", style: TextStyle(fontSize:12)),
-              ),
-            ),
+            top: -8,
+            left: 12,
+            child: Text("m"),      // y축 라벨
           ),
+
+          // (C) 아래 축 라벨: "km"
           Positioned(
-            left:0,
-            right:0,
-            bottom:10,
-            child: Align(
-              alignment: Alignment.center,
-              child: Text("km", style: TextStyle(fontSize:12)),
-            ),
+            right: -12,
+            bottom: 8,
+            child: Text("km"),     // x축 라벨
           ),
         ],
       ),
@@ -1388,6 +1368,10 @@ Widget _buildLineChart({
               interval: yInterval,
               reservedSize: 30.0,
               getTitlesWidget: (value, meta) {
+                // 최댓값 라벨은 숨김
+                if (meta.max == value) {
+                  return const SizedBox.shrink();
+                }
 
                 // 2) 역변환 (isReversed)
                 double realVal = value;
