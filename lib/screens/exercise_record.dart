@@ -1077,7 +1077,7 @@ class _SummaryScreenState extends State<SummaryScreen>
             top: 0,
             bottom: 0,
             child: Align(
-              alignment: Alignment.centerLeft,
+              alignment: Alignment.topLeft,
               child: Transform.rotate(
                 angle: -math.pi / 2,
                 child: const Text(
@@ -1097,7 +1097,7 @@ class _SummaryScreenState extends State<SummaryScreen>
             right: 0,
             bottom: 10,
             child: Align(
-              alignment: Alignment.center,
+              alignment: Alignment.bottomRight,
               child: const Text(
                 "km",
                 style: TextStyle(fontSize: 12),
