@@ -1070,38 +1070,21 @@ class _SummaryScreenState extends State<SummaryScreen>
 
           // 왼상단
           Positioned(
-            // left:0 이면 텍스트가 “왼쪽 화면 모서리”에 붙을 것
-            // 차트의 실제 Y축 라인에 딱 맞추려면 보통 30~40px 쯤 여백
-            // 아래처럼 left: 12 쯤 넣어보며 조정
-            left: 12,
-            top: 0,
-            bottom: 0,
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: Transform.rotate(
-                angle: -math.pi / 2,
-                child: const Text(
-                  "min/km",
-                  style: TextStyle(fontSize: 12),
-                ),
-              ),
+            top: 8,    // 살짝 아래로 내려서 여백
+            left: 12,  // 살짝 오른쪽으로 띄워서 (기기별로 조정 가능)
+            child: Text(
+              "min/km",
+              style: TextStyle(fontSize: 12),
             ),
           ),
 
           // 오른하단
           Positioned(
-            // bottom:0 이면 텍스트가 “화면 맨 아래”에 붙을 것
-            // 보통 차트의 실제 X축 라인보다 20~30px 정도 위
-            // bottom:12 등으로 조정 가능
-            left: 0,
-            right: 0,
-            bottom: 10,
-            child: Align(
-              alignment: Alignment.bottomRight,
-              child: const Text(
-                "km",
-                style: TextStyle(fontSize: 12),
-              ),
+            right: 12,
+            bottom: 8,
+            child: Text(
+              "km",
+              style: TextStyle(fontSize: 12),
             ),
           ),
         ],
