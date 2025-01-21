@@ -62,6 +62,7 @@ class _SummaryScreenState extends State<SummaryScreen>
   // (C) 제목 입력 TextField 컨트롤러
   final TextEditingController titleController = TextEditingController();
 
+
   // (D) 위치 데이터, 폴리라인, 차트 스팟
   List<Polyline> _coloredPolylines = [];
   List<LatLng> _trackPoints = [];
@@ -1063,6 +1064,7 @@ class _SummaryScreenState extends State<SummaryScreen>
               noDataText: "페이스 데이터가 없습니다.",
               isReversed: true,
               offsetValue: offset,
+              yLabelFormatter: (double val) => _formatPace(val),
             ),
           ),
 
@@ -1107,9 +1109,11 @@ class _SummaryScreenState extends State<SummaryScreen>
           // (A) 차트 자체를 전체에 fill
           Positioned.fill(
             child: _buildLineChart(
-              spots: spots,
+              spots: _altSpots,
               color: Colors.orange,
               noDataText: "고도 데이터가 없습니다.",
+              isReversed: false,
+              yLabelFormatter: (double val) => val.toStringAsFixed(1),
               // isReversed: false,
             ),
           ),
@@ -1153,9 +1157,11 @@ class _SummaryScreenState extends State<SummaryScreen>
           // (A) 차트
           Positioned.fill(
             child: _buildLineChart(
-              spots: spots,
+              spots: _speedSpots,
               color: Colors.redAccent,
               noDataText: "속도 데이터가 없습니다.",
+              isReversed: false,
+              yLabelFormatter: (double val) => val.toStringAsFixed(1),
             ),
           ),
 
@@ -1288,17 +1294,21 @@ String _formatPace(double pace) {
 
 
 /// 동적으로 X/Y 범위와 간격을 설정하는 LineChart
+// 어떤 double 값을 받아서, 라벨 문자열을 리턴하는 함수 시그니처
+typedef YLabelFormatter = String Function(double value);
 Widget _buildLineChart({
   required List<FlSpot> spots,
   required Color color,
   String? noDataText,
   bool isReversed = false,  // <<--- 새로 추가
   double? offsetValue,      // <<--- 새로 추가 (역순 변환 시 사용)
+  required YLabelFormatter yLabelFormatter,
 }) {
   // (A) 스팟이 비어있으면 "데이터 없음" 표시
   if (spots.isEmpty) {
     return Center(child: Text(noDataText ?? "데이터가 없습니다."));
   }
+
 
   // (B) X축 범위: [0, maxX]
   final double maxX = spots.map((e) => e.x).reduce((a, b) => a > b ? a : b);
@@ -1382,18 +1392,14 @@ Widget _buildLineChart({
               interval: yInterval,
               reservedSize: 30.0,
               getTitlesWidget: (value, meta) {
-                // 1) 최댓값 라벨 숨기기 (원하면 유지)
-                if (meta.max == value) {
-                  return const SizedBox.shrink();
-                }
 
                 // 2) 역변환 (isReversed)
-                double paceVal = value;
+                double realVal = value;
                 if (isReversed && offsetValue != null) {
-                  paceVal = offsetValue - value;
+                  realVal = offsetValue - value;
                 }
 
-                final label = _formatPace(paceVal);
+                final label = yLabelFormatter(realVal);
                 return Text(label, style: const TextStyle(fontSize: 12));
               },
             ),
