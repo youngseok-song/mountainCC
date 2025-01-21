@@ -1070,24 +1070,38 @@ class _SummaryScreenState extends State<SummaryScreen>
 
           // 왼상단
           Positioned(
-            left: 0,
+            // left:0 이면 텍스트가 “왼쪽 화면 모서리”에 붙을 것
+            // 차트의 실제 Y축 라인에 딱 맞추려면 보통 30~40px 쯤 여백
+            // 아래처럼 left: 12 쯤 넣어보며 조정
+            left: 12,
             top: 0,
-            child: Transform.rotate(
-              angle: -math.pi / 2,
-              child: const Text(
-                "min/km",
-                style: TextStyle(fontSize: 12),
+            bottom: 0,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Transform.rotate(
+                angle: -math.pi / 2,
+                child: const Text(
+                  "min/km",
+                  style: TextStyle(fontSize: 12),
+                ),
               ),
             ),
           ),
 
           // 오른하단
           Positioned(
+            // bottom:0 이면 텍스트가 “화면 맨 아래”에 붙을 것
+            // 보통 차트의 실제 X축 라인보다 20~30px 정도 위
+            // bottom:12 등으로 조정 가능
+            left: 0,
             right: 0,
-            bottom: 0,
-            child: const Text(
-              "km",
-              style: TextStyle(fontSize: 12),
+            bottom: 10,
+            child: Align(
+              alignment: Alignment.center,
+              child: const Text(
+                "km",
+                style: TextStyle(fontSize: 12),
+              ),
             ),
           ),
         ],
@@ -1097,8 +1111,6 @@ class _SummaryScreenState extends State<SummaryScreen>
 
 // 고도 차트
   Widget _buildStackedAltitudeChart() {
-    // 1) spots 준비: 그냥 _altSpots를 그대로 사용 (고도 그래프는 reversed 필요 없음)
-    final spots = _altSpots;
 
     // 2) 실제 차트는 _buildLineChart로
     //    unitY, leftAxisName 이런건 안 써도 됨(축 이름은 Stack으로 배치)
@@ -1119,25 +1131,28 @@ class _SummaryScreenState extends State<SummaryScreen>
           ),
 
           // (B) 왼쪽 위 => "m" (수직 회전)
+          // (B) 왼쪽 축 라벨: "m"
           Positioned(
-            left: 0,
+            left: 12, // 조정
             top: 0,
-            child: Transform.rotate(
-              angle: -math.pi / 2,
-              child: const Text(
-                "m",
-                style: TextStyle(fontSize: 12),
+            bottom: 0,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Transform.rotate(
+                angle: -math.pi / 2,
+                child: Text("m", style: TextStyle(fontSize:12)),
               ),
             ),
           ),
 
-          // (C) 오른쪽 아래 => "km"
+          // (C) 아래 축 라벨: "km"
           Positioned(
+            left: 0,
             right: 0,
-            bottom: 0,
-            child: const Text(
-              "km",
-              style: TextStyle(fontSize: 12),
+            bottom: 10,
+            child: Align(
+              alignment: Alignment.center,
+              child: Text("km", style: TextStyle(fontSize:12)),
             ),
           ),
         ],
@@ -1147,8 +1162,6 @@ class _SummaryScreenState extends State<SummaryScreen>
 
 // 속도 차트
   Widget _buildStackedSpeedChart() {
-    final spots = _speedSpots;
-    // 속도 그래프는 보통 reversed 불필요
 
     return SizedBox(
       height: 200,
@@ -1167,24 +1180,24 @@ class _SummaryScreenState extends State<SummaryScreen>
 
           // (B) 왼쪽 위 => "km/h" (수직 회전)
           Positioned(
-            left: 0,
-            top: 0,
-            child: Transform.rotate(
-              angle: -math.pi / 2,
-              child: const Text(
-                "km/h",
-                style: TextStyle(fontSize: 12),
+            left:12,
+            top:0,
+            bottom:0,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Transform.rotate(
+                angle:-math.pi /2,
+                child: Text("km/h", style: TextStyle(fontSize:12)),
               ),
             ),
           ),
-
-          // (C) 오른쪽 아래 => "km"
           Positioned(
-            right: 0,
-            bottom: 0,
-            child: const Text(
-              "km",
-              style: TextStyle(fontSize: 12),
+            left:0,
+            right:0,
+            bottom:10,
+            child: Align(
+              alignment: Alignment.center,
+              child: Text("km", style: TextStyle(fontSize:12)),
             ),
           ),
         ],
