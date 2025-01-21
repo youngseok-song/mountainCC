@@ -46,15 +46,15 @@ class LocationService {
       switch (_currentActivity) {
         case 'on_foot':
           newBGFilter   = 3.0;   // 걸을 때
-          newHiveFilter = 3.0;
+          newHiveFilter = 6.0;
           break;
         case 'running':
           newBGFilter   = 3.0;   // 뛸 때 더 자주
-          newHiveFilter = 3.0;
+          newHiveFilter = 6.0;
           break;
         case 'on_bicycle':
-          newBGFilter   = 15.0;  // 자전거면 좀 더 큰 필터
-          newHiveFilter = 15.0;
+          newBGFilter   = 10.0;  // 자전거면 좀 더 큰 필터
+          newHiveFilter = 10.0;
           break;
         case 'in_vehicle':
           newBGFilter   = 20.0;  // 차량일 땐 더 크게

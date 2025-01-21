@@ -1,14 +1,11 @@
 // bottom_nav_screen.dart (새 파일 가정)
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+
 import 'map_screen.dart';
 import '../service/movement_service.dart';
 import '../service/location_service.dart';
 import '../service/location_manager.dart';
-
-// 만약 '쇼핑' / '마이페이지'도 WebView로 구성한다면,
-// 각각의 URL만 다를 뿐, 사실상 '공용 WebView 위젯'을 만들어도 되고,
-// 또는 그냥 InAppWebView를 탭마다 각각 써도 됩니다.
 
 class BottomNavScreen extends StatefulWidget {
   final MovementService movementService;
@@ -27,12 +24,9 @@ class BottomNavScreen extends StatefulWidget {
 }
 
 class _BottomNavScreenState extends State<BottomNavScreen> {
-  // (1) 현재 선택된 탭 인덱스
   int _selectedIndex = 0;
 
-  // (2) 탭별 화면 - 5개
-  //     여기서 "홈"과 "검색", "쇼핑", "마이페이지"는 각각 WebView를 보여주도록 구성
-  //     "운동하기"는 MapScreen을 직접 보여준다.
+  // ▼ IndexedStack 안에 넣을 위젯들을 미리 생성해둠.
   late final List<Widget> _screens;
 
   @override
@@ -62,27 +56,32 @@ class _BottomNavScreenState extends State<BottomNavScreen> {
     ];
   }
 
-  // (3) 탭 전환 시 setState
+  Widget _buildWebViewScreen(String url) {
+    return InAppWebView(
+      initialUrlRequest: URLRequest(url: WebUri(url)),
+      // 기타 인앱웹뷰 설정
+    );
+  }
+
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
     });
   }
 
-  // (4) 재사용 가능한 WebView 빌더(간단 예시)
-  Widget _buildWebViewScreen(String initialUrl) {
-    return InAppWebView(
-      initialUrlRequest: URLRequest(url: WebUri(initialUrl)),
-      // 기타 인앱웹뷰 설정
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _screens[_selectedIndex], // 현재 선택된 탭 화면을 표시
+      // (1) IndexedStack 안에 _screens를 children으로 둔다.
+      // (2) index=_selectedIndex 인 것만 화면에 표시하지만, 나머지도 상태는 살아있음.
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: _screens,
+      ),
+
+      // 하단 네비게이션
       bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed, // 5개 탭이므로 fixed 사용
+        type: BottomNavigationBarType.fixed,
         currentIndex: _selectedIndex,
         onTap: _onItemTapped,
         items: const [

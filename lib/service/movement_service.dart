@@ -427,7 +427,6 @@ class MovementService {
     if (legacyOutlierCheck(loc)) {
       return true;
     }
-    // 두 함수 모두 false면 → Outlier 아님
     return false;
   }
 
@@ -443,11 +442,6 @@ class MovementService {
       return false;
     }
     final dtSec = dtMs / 1000.0;
-
-    if (dtSec <= 0.2) {
-      // outlier
-      return true;
-    }
 
     // (A) "LocationService"에 있는 currentActivity 가져오기
     final activity = _locationService.currentActivity;
@@ -477,6 +471,15 @@ class MovementService {
     // (C) 속도 계산
     final distMeter = Distance().distance(_lastLatLng!, LatLng(loc.coords.latitude, loc.coords.longitude));
     final speedKmh = (distMeter / dtSec) * 3.6;
+
+    if (dtSec <= 0.5 || dtSec >= 2000) {
+      // outlier
+      return true;
+    }
+
+    if (speedKmh <= 0.1) {
+      return true; // outlier
+    }
 
     if (speedKmh > speedLimitKmh) {
       return true; // outlier
