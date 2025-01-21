@@ -30,18 +30,28 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  geolocator: 13.0.2
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   flutter_map: ^7.0.2
-  latlong2: ^0.9.1
-  flutter_barometer_plugin: ^0.0.1+3
   flutter_inappwebview: ^6.1.5
+  flutter_background_geolocation: ^4.16.6
+  background_fetch: ^1.3.7
+  sensors_plus: ^6.1.1
+  permission_handler: ^11.3.1
+  flutter_compass: ^0.8.1
+  connectivity_plus: ^6.1.1
+  flutter_svg: ^2.0.16
+  gpx: ^2.3.0
+  flutter_riverpod: ^2.6.1
+  shared_preferences: ^2.3.5
+  fl_chart: ^0.70.1
+  latlong2: ^0.9.1
+  intl: ^0.20.1
 
 
 
 dev_dependencies:
-  hive_generator: ^1.1.0
+  hive_generator: ^2.0.1
   build_runner: ^2.3.3
 
   # The "flutter_lints" package below contains a set of recommended lints to
@@ -56,6 +66,18 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  assets:
+    - assets/icons/elevation.svg
+    - assets/icons/altitude.svg
+    - assets/icons/speed.svg
+    - assets/icons/distance.svg
+    - assets/icons/pause.svg
+    - assets/icons/restart.svg
+    - assets/icons/end.svg
+    - assets/icons/loading.gif
+    - assets/icons/map_start.svg
+    - assets/icons/map_end.svg
+    - assets/icons/descent.svg
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

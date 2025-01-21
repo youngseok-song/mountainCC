@@ -21,13 +21,14 @@ class LocationDataAdapter extends TypeAdapter<LocationData> {
       longitude: fields[1] as double,
       altitude: fields[2] as double,
       timestamp: fields[3] as DateTime,
+      accuracy: fields[4] as double,
     );
   }
 
   @override
   void write(BinaryWriter writer, LocationData obj) {
     writer
-      ..writeByte(4)
+      ..writeByte(5)
       ..writeByte(0)
       ..write(obj.latitude)
       ..writeByte(1)
@@ -35,7 +36,9 @@ class LocationDataAdapter extends TypeAdapter<LocationData> {
       ..writeByte(2)
       ..write(obj.altitude)
       ..writeByte(3)
-      ..write(obj.timestamp);
+      ..write(obj.timestamp)
+      ..writeByte(4)
+      ..write(obj.accuracy);
   }
 
   @override
@@ -44,7 +47,7 @@ class LocationDataAdapter extends TypeAdapter<LocationData> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-          other is LocationDataAdapter &&
-              runtimeType == other.runtimeType &&
-              typeId == other.typeId;
+      other is LocationDataAdapter &&
+          runtimeType == other.runtimeType &&
+          typeId == other.typeId;
 }
