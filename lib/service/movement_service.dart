@@ -444,10 +444,10 @@ class MovementService {
     }
     final dtSec = dtMs / 1000.0;
 
-    /*if (dtSec < 1.0) {
+    if (dtSec <= 0.2) {
       // outlier
       return true;
-    }*/
+    }
 
     // (A) "LocationService"에 있는 currentActivity 가져오기
     final activity = _locationService.currentActivity;

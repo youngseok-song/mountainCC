@@ -290,6 +290,8 @@ class MapScreenState extends State<MapScreen> {
     // onStopWorkout 콜백이 있다면 호출 (WebView 복귀 등)
     widget.onStopWorkout?.call();
 
+    widget.locationService.lastSavedPosition = null;
+
     // → (B) 먼저 SummaryScreen 이동 후,
     Navigator.push(
       context,

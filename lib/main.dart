@@ -8,6 +8,7 @@ import 'screens/webview_and_map_screen.dart'; // 새로 만든 화면 import
 import 'service/movement_service.dart';
 import 'service/location_service.dart';
 import 'service/location_manager.dart';
+import 'screens/bottom_nav_screen.dart';
 import 'screens/map_screen.dart';
 
 // 1) 헤드리스 함수 정의
@@ -48,13 +49,10 @@ void backgroundGeolocationHeadlessTask(bg.HeadlessEvent headlessEvent) async {
 final GlobalKey<MapScreenState> mapScreenKey = GlobalKey<MapScreenState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   // 1) Hive 초기화
   await Hive.initFlutter();
-
   // 2) LocationData 타입 어댑터 등록
   Hive.registerAdapter(LocationDataAdapter());
-
   // 3) locationBox 오픈 (타입 명시: LocationData)
   await Hive.openBox<LocationData>('locationBox');
 
@@ -63,6 +61,7 @@ void main() async {
   final locationService = LocationService(locationBox);
 
   // 2) 객체 준비
+
   final movementService = MovementService(
     locationService: locationService, // 이 부분 꼭 추가
   );
@@ -126,7 +125,7 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
       debugShowCheckedModeBanner: false,
-      home: WebViewAndMapScreen(
+      home: BottomNavScreen(
         movementService: movementService,
         locationService: locationService,
         locationManager: locationManager,
