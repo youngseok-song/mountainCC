@@ -786,19 +786,23 @@ class _SummaryScreenState extends State<SummaryScreen>
           children: [
             // 1) 페이스
             const Text("페이스", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            SizedBox(height:20),
             _buildPaceChart(),
+            SizedBox(height:10),
             _buildPaceSummary(),
             const SizedBox(height: 30),
 
             // 2) 고도
             const Text("고도", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             _buildAltitudeChart(),
+            SizedBox(height:10),
             _buildAltitudeSummary(),
             const SizedBox(height: 30),
 
             // 3) 속도
             const Text("속도", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             _buildSpeedChart(),
+            SizedBox(height:10),
             _buildSpeedSummary(),
             const SizedBox(height: 30),
           ],
@@ -1285,7 +1289,7 @@ Widget _buildLineChart({
             sideTitles: SideTitles(
               showTitles: true,
               interval: yInterval,
-              reservedSize: 5.0,
+              reservedSize: 30.0,
               getTitlesWidget: (value, meta) {
                 // (E) isReversed => 라벨 변환
                 if (meta.max == value) {
