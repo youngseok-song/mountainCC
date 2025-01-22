@@ -696,11 +696,11 @@ class _SummaryScreenState extends State<SummaryScreen>
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: const [
-              Expanded(child: Text("거리(km)", textAlign: TextAlign.center)),
+              Expanded(child: Text("거리\n(km)", textAlign: TextAlign.center)),
               Expanded(child: Text("시간", textAlign: TextAlign.center)),
-              Expanded(child: Text("평균속도(km/h)", textAlign: TextAlign.center)),
-              Expanded(child: Text("페이스(min/km)", textAlign: TextAlign.center)),
-              Expanded(child: Text("상승고도(m)", textAlign: TextAlign.center)),
+              Expanded(child: Text("평균속도\n(km/h)", textAlign: TextAlign.center)),
+              Expanded(child: Text("페이스\n(min/km)", textAlign: TextAlign.center)),
+              Expanded(child: Text("상승고도\n(m)", textAlign: TextAlign.center)),
             ],
           ),
         ),
