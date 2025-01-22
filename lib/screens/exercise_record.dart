@@ -5,8 +5,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:math' as math;
-
 import 'package:latlong2/latlong.dart' as latlng;  // Distance 계산용
+import 'dart:ui' as ui;
 
 // Hive, GPX 관련 임포트
 import 'package:hive/hive.dart';
@@ -1566,7 +1566,7 @@ double _calculateDynamicReservedSize({
 
   // TextPainter 준비
   final painter = TextPainter(
-    textDirection: TextDirection.ltr,
+    textDirection: ui.TextDirection.ltr,
     maxLines: 1,
   );
 
