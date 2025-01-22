@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'dart:math' as math;
 
 import 'package:latlong2/latlong.dart' as latlng;  // Distance 계산용
 
@@ -1328,13 +1329,17 @@ class _SummaryScreenState extends State<SummaryScreen>
         children: [
           // (A) 차트 자체를 전체에 fill
           Positioned.fill(
-            child: _buildLineChart(
-              spots: _altSpots,
-              color: Colors.orange,
-              noDataText: "고도 데이터가 없습니다.",
-              isReversed: false,
-              yLabelFormatter: (double val) => val.toStringAsFixed(1),
-              // isReversed: false,
+            child: Padding(
+              // 그래프 자체에 여백을 주고 싶다면 Padding으로 감싸기
+              padding: const EdgeInsets.only(top: 20, left: 0, right: 20, bottom: 0),
+              child: _buildLineChart(
+                spots: _altSpots,
+                color: Colors.orange,
+                noDataText: "고도 데이터가 없습니다.",
+                isReversed: false,
+                yLabelFormatter: (double val) => val.toStringAsFixed(1),
+                // isReversed: false,
+              ),
             ),
           ),
 
@@ -1349,7 +1354,7 @@ class _SummaryScreenState extends State<SummaryScreen>
           // (C) 아래 축 라벨: "km"
           Positioned(
             right: 0,
-            bottom: 0,
+            bottom: 5,
             child: Text("km"),     // x축 라벨
           ),
         ],
@@ -1366,14 +1371,19 @@ class _SummaryScreenState extends State<SummaryScreen>
         children: [
           // (A) 차트
           Positioned.fill(
-            child: _buildLineChart(
-              spots: _speedSpots,
-              color: Colors.redAccent,
-              noDataText: "속도 데이터가 없습니다.",
-              isReversed: false,
-              yLabelFormatter: (double val) => val.toStringAsFixed(1),
+            child: Padding(
+              // 그래프 자체에 여백을 주고 싶다면 Padding으로 감싸기
+              padding: const EdgeInsets.only(top: 20, left: 0, right: 20, bottom: 0),
+              child: _buildLineChart(
+                spots: _speedSpots,
+                color: Colors.redAccent,
+                noDataText: "속도 데이터가 없습니다.",
+                isReversed: false,
+                yLabelFormatter: (double val) => val.toStringAsFixed(1),
+              ),
             ),
           ),
+
 
           // (B) 왼쪽 위 => "km/h" (수직 회전)
           Positioned(
@@ -1522,10 +1532,16 @@ Widget _buildLineChart({
   // (C) Y축 범위
   // - isReversed=false → 0..maxY
   // - isReversed=true  → 0..(offsetValue - minPace), etc (이미 변환된 spots를 쓴다면 단순 계산)
-  final double maxY = spots.map((e) => e.y).reduce((a, b) => a > b ? a : b);
-  final double minY = spots.map((e) => e.y).reduce((a, b) => a < b ? a : b);
+  final double maxY = spots.map((e) => e.y).reduce(math.max);
+  final double minY = spots.map((e) => e.y).reduce(math.min);
 
-  double yRange = (maxY - minY).abs();
+// 1) maxY를 1.2배 늘림
+  double extendedMaxY = maxY * 1.2;
+
+// 2) yRange = extendedMaxY - minY
+  double yRange = (extendedMaxY - minY).abs(); // alt나 pace가 음수 아닌 이상 그대로 써도 됨
+
+// 3) interval
   double yInterval = yRange > 0 ? yRange / 5 : 1.0;
 
   // (D) 차트에 표시할 라인
@@ -1551,7 +1567,7 @@ Widget _buildLineChart({
 
         // (2) minY, maxY: 이미 spots가 변환되어 왔으므로, 그대로 사용
         minY: minY,
-        maxY: maxY * 1.2,
+        maxY: maxY,
         gridData: FlGridData(
           show: true,
           drawVerticalLine: true,
@@ -1590,8 +1606,12 @@ Widget _buildLineChart({
             sideTitles: SideTitles(
               showTitles: true,
               interval: yInterval,
-              reservedSize: 40.0,
+              reservedSize: 50.0,
               getTitlesWidget: (value, meta) {
+                // 최댓값 라벨은 숨김
+                if (meta.max == value) {
+                  return const SizedBox.shrink();
+                }
 
                 // 2) 역변환 (isReversed)
                 double realVal = value;
