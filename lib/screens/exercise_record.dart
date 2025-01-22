@@ -1305,7 +1305,7 @@ class _SummaryScreenState extends State<SummaryScreen>
           // (4) 그래프 바깥 오른쪽 하단에 "km" 표시
           Positioned(
             right: 0,
-            bottom: -5,
+            bottom: 5,
             child: Text(
               "km",
               style: TextStyle(fontSize: 12, color: Colors.black),
@@ -1592,10 +1592,6 @@ Widget _buildLineChart({
               interval: yInterval,
               reservedSize: 40.0,
               getTitlesWidget: (value, meta) {
-                // 최댓값 라벨은 숨김
-                if (meta.max == value) {
-                  return const SizedBox.shrink();
-                }
 
                 // 2) 역변환 (isReversed)
                 double realVal = value;
