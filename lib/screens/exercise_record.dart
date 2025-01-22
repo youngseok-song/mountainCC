@@ -1272,7 +1272,7 @@ class _SummaryScreenState extends State<SummaryScreen>
           Positioned.fill(
             child: Padding(
               // 그래프 자체에 여백을 주고 싶다면 Padding으로 감싸기
-              padding: const EdgeInsets.only(top: 20, left: 20, right: 20, bottom: 20),
+              padding: const EdgeInsets.only(top: 20, left: 0, right: 20, bottom: 0),
               child: _buildLineChart(
                 spots: reversedSpots,
                 color: Colors.purple,
