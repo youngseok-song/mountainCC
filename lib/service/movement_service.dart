@@ -385,7 +385,8 @@ class MovementService {
     // result가 (ekfLat, ekfLon, acc) 형태이므로, 구조분해 할당
     final (rowLat, rowLon, acc) = result;
 
-    final fusedAlt = _handleAltitudeAndBaro(loc);
+    //final fusedAlt = _handleAltitudeAndBaro(loc);
+    final fusedAlt = loc.coords.altitude;
 
     // (4) 결과(ekf.x, ekf.y)를 사용해 폴리라인 추가, 고도 계산 등
     _polylinePoints.add(LatLng(rowLat, rowLon));
@@ -404,10 +405,10 @@ class MovementService {
 
   // 원본 gps 로직
   ( double, double, double )? _applyRawGPS(bg.Location loc) {
-    if (!_baroOffsetInitialized) {
+    /*if (!_baroOffsetInitialized) {
       setInitialBaroOffsetIfPossible(loc.coords.altitude);
       _baroOffsetInitialized = true;
-    }
+    }*/
 
     // 1) lat/lon 그대로 사용
     final lat = loc.coords.latitude;

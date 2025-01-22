@@ -547,34 +547,30 @@ class _SummaryScreenState extends State<SummaryScreen>
     return DefaultTabController(
       length: 3,
       child: Scaffold(
-        body: Column(
-          children: [
-            // 상단 탭 영역
-            Container(
-              color: Colors.white,
-              child: TabBar(
-                controller: _tabController,
-                labelColor: Colors.black,
-                unselectedLabelColor: Colors.grey,
-                tabs: const [
-                  Tab(text: "운동 기록 요약"),
-                  Tab(text: "운동 기록 상세"),
-                  Tab(text: "랩 통계"),
-                ],
-              ),
-            ),
+        // (1) 상단 AppBar 설정
+        appBar: AppBar(
+          title: const Text("운동 기록"), // 원하는 타이틀
+          backgroundColor: Colors.white, // AppBar 배경색 (원하는 색으로 변경 가능)
+          elevation: 0,                  // 그늘(음영) 제거하고 싶으면 0
+          bottom: TabBar(
+            controller: _tabController,
+            labelColor: Colors.black,
+            unselectedLabelColor: Colors.grey,
+            tabs: const [
+              Tab(text: "운동 기록 요약"),
+              Tab(text: "운동 기록 상세"),
+              Tab(text: "랩 통계"),
+            ],
+          ),
+        ),
 
-            // 탭 내용
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildRecordSummaryTab(),
-                  _buildRecordDetailTab(),
-                  _buildLapStatsTab(),
-                ],
-              ),
-            ),
+        // (2) 화면 본문에는 TabBarView만
+        body: TabBarView(
+          controller: _tabController,
+          children: [
+            _buildRecordSummaryTab(),
+            _buildRecordDetailTab(),
+            _buildLapStatsTab(),
           ],
         ),
       ),
@@ -1365,6 +1361,7 @@ class _SummaryScreenState extends State<SummaryScreen>
                 isReversed: false,
                 yLabelFormatter: (double val) => val.toStringAsFixed(1),
                 // isReversed: false,
+                isAltitudeChart: true,
               ),
             ),
           ),
@@ -1599,54 +1596,59 @@ double _calculateDynamicReservedSize({
 /// 동적으로 X/Y 범위와 간격을 설정하는 LineChart
 // 어떤 double 값을 받아서, 라벨 문자열을 리턴하는 함수 시그니처
 typedef YLabelFormatter = String Function(double value);
+
 Widget _buildLineChart({
   required List<FlSpot> spots,
   required Color color,
   String? noDataText,
-  bool isReversed = false,  // <<--- 새로 추가
-  double? offsetValue,      // <<--- 새로 추가 (역순 변환 시 사용)
+  bool isReversed = false,
+  double? offsetValue,
   required YLabelFormatter yLabelFormatter,
+  bool isAltitudeChart = false,
 }) {
-  // (A) 스팟이 비어있으면 "데이터 없음" 표시
+  // (A) 스팟이 비어있으면
   if (spots.isEmpty) {
     return Center(child: Text(noDataText ?? "데이터가 없습니다."));
   }
 
-
-  // (B) X축 범위: [0, maxX]
-  final double maxX = spots.map((e) => e.x).reduce((a, b) => a > b ? a : b);
+  // (B) X축 범위
+  final double maxX = spots.map((e) => e.x).reduce(math.max);
   final double minX = 0.0;
 
-  // X축 간격
-  double xRange = maxX - minX;
-  double xInterval = xRange > 0 ? xRange / 10 : 1.0;
+  final double xRange = maxX - minX;
+  final double xInterval = (xRange > 0) ? xRange / 10 : 1.0;
 
-  // (C) Y축 범위
-  // - isReversed=false → 0..maxY
-  // - isReversed=true  → 0..(offsetValue - minPace), etc (이미 변환된 spots를 쓴다면 단순 계산)
-  final double maxY = spots.map((e) => e.y).reduce(math.max);
-  final double minY = spots.map((e) => e.y).reduce(math.min);
+  // (C) Y축: 실제 데이터 min/max
+  double rawMaxY = spots.map((e) => e.y).reduce(math.max);
+  double rawMinY = spots.map((e) => e.y).reduce(math.min);
 
-// 1) maxY를 1.2배 늘림
-  double extendedMaxY = maxY * 1.2;
+  // (C-1) 만약 "고도 차트"라면 minY를 0으로 (또는 0 이하이면 그대로)
+  //       예: 고도가 50~100이라면 그래프가 0~120까지 표시됨
+  if (isAltitudeChart) {
+    // 만약 실제 minY가 음수이면 max(0, rawMinY) 형태로 할 수도 있음
+    // 여기서는 단순히 무조건 0으로 강제
+    rawMinY = 0;
+  }
 
-// 2) yRange = extendedMaxY - minY
-  double yRange = (extendedMaxY - minY).abs(); // alt나 pace가 음수 아닌 이상 그대로 써도 됨
+  // (D) maxY를 1.2배 늘림
+  final double extendedMaxY = rawMaxY * 1.2;
 
-// 3) interval
-  double yInterval = yRange > 0 ? yRange / 5 : 1.0;
+  // (E) yRange, interval
+  double yRange = (extendedMaxY - rawMinY).abs();
+  double yInterval = (yRange > 0) ? (yRange / 5) : 1.0;
 
+  // (F) sideTitles 폭 계산
   final sideReserved = _calculateDynamicReservedSize(
     spots: spots,
     isReversed: isReversed,
     offsetValue: offsetValue,
     yLabelFormatter: yLabelFormatter,
     textStyle: const TextStyle(fontSize: 12),
-    extendedFactor: 1.2, // or 필요하다면 별도 값
-    divisions: 5,        // 5등분
+    extendedFactor: 1.2,
+    divisions: 5,
   );
 
-  // (D) 차트에 표시할 라인
+  // (G) 실제 차트 데이터
   final lineBarData = LineChartBarData(
     spots: spots,
     isCurved: true,
@@ -1663,28 +1665,25 @@ Widget _buildLineChart({
     height: 200,
     child: LineChart(
       LineChartData(
-        // (1) minX/maxX: 그대로
+        // (H) 최종 적용: minX, maxX는 그대로
         minX: minX,
         maxX: maxX,
 
-        // (2) minY, maxY: 이미 spots가 변환되어 왔으므로, 그대로 사용
-        minY: minY,
-        maxY: maxY,
+        // 고도 차트일 때는 minY=0, 그렇지 않으면 기존 값
+        minY: rawMinY,
+        // 최대값은 1.2배 늘린 extendedMaxY
+        maxY: extendedMaxY,
+
         gridData: FlGridData(
           show: true,
+          verticalInterval: xInterval,
+          horizontalInterval: yInterval,
           drawVerticalLine: true,
           drawHorizontalLine: true,
-
-          // X축 점선 간격
-          verticalInterval: xInterval,
-          // Y축 점선 간격
-          horizontalInterval: yInterval,
-
-          // (B) 점선 스타일
           getDrawingHorizontalLine: (value) => FlLine(
             color: Colors.grey,
             strokeWidth: 0.5,
-            dashArray: [4,4],  // 4픽셀 점선, 4픽셀 공백
+            dashArray: [4,4],
           ),
           getDrawingVerticalLine: (value) => FlLine(
             color: Colors.grey,
@@ -1703,8 +1702,6 @@ Widget _buildLineChart({
         ),
         titlesData: FlTitlesData(
           leftTitles: AxisTitles(
-            /// (축 이름)
-            axisNameWidget: null,
             sideTitles: SideTitles(
               showTitles: true,
               interval: yInterval,
@@ -1714,20 +1711,16 @@ Widget _buildLineChart({
                 if (meta.max == value) {
                   return const SizedBox.shrink();
                 }
-
-                // 2) 역변환 (isReversed)
                 double realVal = value;
                 if (isReversed && offsetValue != null) {
                   realVal = offsetValue - value;
                 }
-
                 final label = yLabelFormatter(realVal);
                 return Text(label, style: const TextStyle(fontSize: 12));
               },
             ),
           ),
           bottomTitles: AxisTitles(
-            axisNameWidget: null,
             sideTitles: SideTitles(
               showTitles: true,
               interval: xInterval,
@@ -1736,8 +1729,10 @@ Widget _buildLineChart({
                 if (value == meta.max) {
                   return const SizedBox.shrink();
                 }
-                return Text(value.toStringAsFixed(1),
-                    style: const TextStyle(fontSize: 12));
+                return Text(
+                  value.toStringAsFixed(1),
+                  style: const TextStyle(fontSize: 12),
+                );
               },
             ),
           ),
@@ -1753,4 +1748,5 @@ Widget _buildLineChart({
     ),
   );
 }
+
 
