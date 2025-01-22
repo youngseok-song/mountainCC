@@ -1256,8 +1256,8 @@ class _SummaryScreenState extends State<SummaryScreen>
 
 // 페이스 차트
   Widget _buildStackedPaceChart() {
-    // 1) reversedSpots 계산
-    final offset = _maxPace; // ex) 33
+    // (1) reversedSpots 계산
+    final offset = _maxPace;
     final reversedSpots = _paceSpots.map((spot) {
       final reversedY = offset - spot.y;
       return FlSpot(spot.x, reversedY);
@@ -1268,34 +1268,42 @@ class _SummaryScreenState extends State<SummaryScreen>
       child: Stack(
         clipBehavior: Clip.none,
         children: [
+          // (2) 차트 채우기
           Positioned.fill(
-            child: _buildLineChart(
-              spots: reversedSpots,
-              color: Colors.purple,
-              noDataText: "페이스 데이터가 없습니다.",
-              isReversed: true,
-              offsetValue: offset,
-              yLabelFormatter: (double val) => _formatPace(val),
+            child: Padding(
+              // 그래프 자체에 여백을 주고 싶다면 Padding으로 감싸기
+              padding: const EdgeInsets.only(top: 20, left: 20, right: 20, bottom: 20),
+              child: _buildLineChart(
+                spots: reversedSpots,
+                color: Colors.purple,
+                noDataText: "페이스 데이터가 없습니다.",
+                isReversed: true,
+                offsetValue: offset,
+                // ↑ 축을 전부 숨겼으므로, yLabelFormatter도 실제 표시엔 안 쓰이지만
+                //   내부 계산이 필요하시다면 남겨두셔도 됩니다
+                yLabelFormatter: (double val) => _formatPace(val),
+              ),
             ),
           ),
 
-          // 왼상단
+
+          // (3) 그래프 바깥 왼쪽 상단에 "min/km" 표시
           Positioned(
-            top: 0,    // 살짝 아래로 내려서 여백
-            left: 12,  // 살짝 오른쪽으로 띄워서 (기기별로 조정 가능)
+            top: 0,
+            left: 0,
             child: Text(
               "min/km",
-              style: TextStyle(fontSize: 12),
+              style: TextStyle(fontSize: 12, color: Colors.black),
             ),
           ),
 
-          // 오른하단
+          // (4) 그래프 바깥 오른쪽 하단에 "km" 표시
           Positioned(
-            right: 12,
-            bottom: 8,
+            right: 0,
+            bottom: 0,
             child: Text(
               "km",
-              style: TextStyle(fontSize: 12),
+              style: TextStyle(fontSize: 12, color: Colors.black),
             ),
           ),
         ],
@@ -1329,14 +1337,14 @@ class _SummaryScreenState extends State<SummaryScreen>
           // (B) 왼쪽 축 라벨: "m"
           Positioned(
             top: 0,
-            left: 12,
+            left: 0,
             child: Text("m"),      // y축 라벨
           ),
 
           // (C) 아래 축 라벨: "km"
           Positioned(
-            right: 12,
-            bottom: 8,
+            right: 0,
+            bottom: 0,
             child: Text("km"),     // x축 라벨
           ),
         ],
@@ -1365,14 +1373,14 @@ class _SummaryScreenState extends State<SummaryScreen>
           // (B) 왼쪽 위 => "km/h" (수직 회전)
           Positioned(
             top: 0,
-            left: 12,
+            left: 0,
             child: Text("km/h"),      // y축 라벨
           ),
 
           // (C) 아래 축 라벨: "km"
           Positioned(
-            right: 12,
-            bottom: 8,
+            right: 0,
+            bottom: 0,
             child: Text("km"),     // x축 라벨
           ),
         ],
