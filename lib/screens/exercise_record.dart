@@ -1296,7 +1296,7 @@ class _SummaryScreenState extends State<SummaryScreen>
     }).toList();
 
     return SizedBox(
-      height: 200,
+      height: 250,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -1304,7 +1304,7 @@ class _SummaryScreenState extends State<SummaryScreen>
           Positioned.fill(
             child: Padding(
               // 그래프 자체에 여백을 주고 싶다면 Padding으로 감싸기
-              padding: const EdgeInsets.only(top: 25, left: 0, right: 25, bottom: 0),
+              padding: const EdgeInsets.only(top: 35, left: 0, right: 25, bottom: 0),
               child: _buildLineChart(
                 spots: reversedSpots,
                 color: Colors.purple,
@@ -1349,7 +1349,7 @@ class _SummaryScreenState extends State<SummaryScreen>
     // 2) 실제 차트는 _buildLineChart로
     //    unitY, leftAxisName 이런건 안 써도 됨(축 이름은 Stack으로 배치)
     return SizedBox(
-      height: 200,
+      height: 250,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -1357,7 +1357,7 @@ class _SummaryScreenState extends State<SummaryScreen>
           Positioned.fill(
             child: Padding(
               // 그래프 자체에 여백을 주고 싶다면 Padding으로 감싸기
-              padding: const EdgeInsets.only(top: 20, left: 0, right: 20, bottom: 0),
+              padding: const EdgeInsets.only(top: 35, left: 0, right: 25, bottom: 0),
               child: _buildLineChart(
                 spots: _altSpots,
                 color: Colors.orange,
@@ -1391,7 +1391,7 @@ class _SummaryScreenState extends State<SummaryScreen>
 // 속도 차트
   Widget _buildStackedSpeedChart() {
     return SizedBox(
-      height: 200,
+      height: 250,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -1399,7 +1399,7 @@ class _SummaryScreenState extends State<SummaryScreen>
           Positioned.fill(
             child: Padding(
               // 그래프 자체에 여백을 주고 싶다면 Padding으로 감싸기
-              padding: const EdgeInsets.only(top: 20, left: 0, right: 20, bottom: 0),
+              padding: const EdgeInsets.only(top: 35, left: 0, right: 25, bottom: 0),
               child: _buildLineChart(
                 spots: _speedSpots,
                 color: Colors.redAccent,
@@ -1529,6 +1529,72 @@ String _formatPace(double pace) {
   return "$minPart'${secPart.toString().padLeft(2, '0')}\"";
 }
 
+/// 라벨 후보를 미리 생성하고, 실제 문자열 폭을 측정하여
+/// 필요한 reservedSize(픽셀 단위)를 동적으로 계산
+double _calculateDynamicReservedSize({
+  required List<FlSpot> spots,
+  required bool isReversed,
+  required double? offsetValue,
+  required YLabelFormatter yLabelFormatter,
+  required TextStyle textStyle,
+  double extendedFactor = 1.2, // y최댓값에 곱할 팩터 (ex: 1.2=20% 여유)
+  int divisions = 5,          // 몇 등분할지 (ex: 5등분)
+}) {
+  if (spots.isEmpty) {
+    return 50; // 데이터가 없으면 기본값 50 정도 리턴
+  }
+
+  // 1) rawMinY, rawMaxY 찾기
+  final double rawMaxY = spots.map((e) => e.y).reduce(math.max);
+  final double rawMinY = spots.map((e) => e.y).reduce(math.min);
+
+  // 2) 여유를 준 maxY
+  final double extendedMaxY = rawMaxY * extendedFactor;
+
+  // 실제 범위
+  final double yRange = (extendedMaxY - rawMinY).abs();
+  final double yInterval = (yRange > 0) ? (yRange / divisions) : 1.0;
+
+  // 라벨 후보 y값들 생성
+  List<double> yValues = [];
+  double current = rawMinY;
+  // 혹시 minY가 음수일 수도 있으니, while 조건에 조금 여유(오차) 고려
+  while (current <= extendedMaxY + 1e-9) {
+    yValues.add(current);
+    current += yInterval;
+  }
+
+  // TextPainter 준비
+  final painter = TextPainter(
+    textDirection: TextDirection.ltr,
+    maxLines: 1,
+  );
+
+  double maxWidth = 0.0;
+
+  // 라벨 후보 각각에 대해 폭 측정
+  for (double val in yValues) {
+    double realVal = val;
+    if (isReversed && offsetValue != null) {
+      realVal = offsetValue - val;
+    }
+
+    final labelString = yLabelFormatter(realVal);
+    final span = TextSpan(text: labelString, style: textStyle);
+
+    painter.text = span;
+    painter.layout(); // 실제 텍스트 레이아웃 계산
+
+    if (painter.width > maxWidth) {
+      maxWidth = painter.width;
+    }
+  }
+
+  // 폭 + α(약간의 여백)
+  return maxWidth + 8;
+}
+
+
 
 /// 동적으로 X/Y 범위와 간격을 설정하는 LineChart
 // 어떤 double 값을 받아서, 라벨 문자열을 리턴하는 함수 시그니처
@@ -1569,6 +1635,16 @@ Widget _buildLineChart({
 
 // 3) interval
   double yInterval = yRange > 0 ? yRange / 5 : 1.0;
+
+  final sideReserved = _calculateDynamicReservedSize(
+    spots: spots,
+    isReversed: isReversed,
+    offsetValue: offsetValue,
+    yLabelFormatter: yLabelFormatter,
+    textStyle: const TextStyle(fontSize: 12),
+    extendedFactor: 1.2, // or 필요하다면 별도 값
+    divisions: 5,        // 5등분
+  );
 
   // (D) 차트에 표시할 라인
   final lineBarData = LineChartBarData(
@@ -1632,7 +1708,7 @@ Widget _buildLineChart({
             sideTitles: SideTitles(
               showTitles: true,
               interval: yInterval,
-              reservedSize: 50.0,
+              reservedSize: sideReserved,
               getTitlesWidget: (value, meta) {
                 // 최댓값 라벨은 숨김
                 if (meta.max == value) {
