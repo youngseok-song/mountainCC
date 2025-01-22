@@ -680,51 +680,77 @@ class _SummaryScreenState extends State<SummaryScreen>
       return const Center(child: Text("저장된 위치데이터가 없습니다."));
     }
 
-    // 1) 시간 순 정렬
+    // (1) 시간 순 정렬 + 랩 리스트 생성
     locs.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    // 2) 랩 리스트 생성
     final laps = _makeLapList(locs);
 
-    return ListView.separated(
-      itemCount: laps.length,
-      // (A) 각 랩 표시
-      itemBuilder: (context, index) {
-        final lap = laps[index];
-
-        final distStr = "${lap.distanceKm.toStringAsFixed(2)} km";
-        final durStr  = _formatDuration(lap.lapDuration);
-        final speedStr= "${lap.avgSpeedKmh.toStringAsFixed(2)} km/h";
-        final paceStr = lap.paceString;
-        final ascentStr = "${lap.cumulativeAscent.toStringAsFixed(2)} m";
-
-        return ListTile(
-          leading: Text("${index + 1} 랩"),
-          title: Row(
+    // (2) Column으로 감싼 뒤, 위에는 헤더, 아래는 Expanded(ListView)
+    return Column(
+      children: [
+        // ---------------------------
+        // [A] 헤더 영역
+        // ---------------------------
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          color: Colors.grey[200],  // 헤더 배경색(원하시는 색상)
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              Expanded(child: Text(distStr)),
-              Expanded(child: Text(durStr)),
-              Expanded(child: Text(speedStr)),
-              Expanded(child: Text(paceStr)),
-              Expanded(child: Text(ascentStr)),
+            children: const [
+              Expanded(child: Text("거리(km)", textAlign: TextAlign.center)),
+              Expanded(child: Text("시간", textAlign: TextAlign.center)),
+              Expanded(child: Text("평균속도(km/h)", textAlign: TextAlign.center)),
+              Expanded(child: Text("페이스(min/km)", textAlign: TextAlign.center)),
+              Expanded(child: Text("상승고도(m)", textAlign: TextAlign.center)),
             ],
           ),
-        );
-      },
-      // (B) 랩과 랩 사이 구분자(Separator) 위젯
-      separatorBuilder: (context, index) {
-        return Column(
-          children: const [
-            SizedBox(height: 5),
-            // 얇은 가로선
-            Divider(
-              thickness: 1,       // 선 두께
-              color: Color(0xFFDADADA), // 선 색상(원하는 컬러)
-            ),
-            SizedBox(height: 5),
-          ],
-        );
-      },
+        ),
+
+        // ---------------------------
+        // [B] 랩 리스트 (ListView)
+        // ---------------------------
+        Expanded(
+          child: ListView.separated(
+            itemCount: laps.length,
+            itemBuilder: (context, index) {
+              final lap = laps[index];
+
+              // 데이터 뽑기
+              final distStr   = "${lap.distanceKm.toStringAsFixed(2)}";
+              final durStr    = _formatDuration(lap.lapDuration);
+              final speedStr  = "${lap.avgSpeedKmh.toStringAsFixed(2)}";
+              final paceStr   = lap.paceString;
+              final ascentStr = "${lap.cumulativeAscent.toStringAsFixed(2)}";
+
+              return Container(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    Expanded(child: Text(distStr,   textAlign: TextAlign.center)),
+                    Expanded(child: Text(durStr,    textAlign: TextAlign.center)),
+                    Expanded(child: Text(speedStr,  textAlign: TextAlign.center)),
+                    Expanded(child: Text(paceStr,   textAlign: TextAlign.center)),
+                    Expanded(child: Text(ascentStr, textAlign: TextAlign.center)),
+                  ],
+                ),
+              );
+            },
+            separatorBuilder: (context, index) {
+              // 랩들 사이에 구분선(Separator)을 넣고 싶다면
+              return Column(
+                children: const [
+                  SizedBox(height: 5),
+                  Divider(
+                    thickness: 1,
+                    color: Color(0xFFDADADA),
+                  ),
+                  SizedBox(height: 5),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -1278,7 +1304,7 @@ class _SummaryScreenState extends State<SummaryScreen>
           Positioned.fill(
             child: Padding(
               // 그래프 자체에 여백을 주고 싶다면 Padding으로 감싸기
-              padding: const EdgeInsets.only(top: 20, left: 0, right: 20, bottom: 0),
+              padding: const EdgeInsets.only(top: 20, left: 5, right: 10, bottom: 0),
               child: _buildLineChart(
                 spots: reversedSpots,
                 color: Colors.purple,
