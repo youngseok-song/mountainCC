@@ -291,6 +291,11 @@ class _SummaryScreenState extends State<SummaryScreen>
       // Altitude
       final alt = loc.altitude;
 
+      // 페이스 그래프 클램핑
+      if (paceMinPerKm.isInfinite || paceMinPerKm > 60) {
+        paceMinPerKm = 60;
+      }
+
       // === Spots
       _paceSpots.add(FlSpot(cumulativeDist, paceMinPerKm));
       _altSpots.add(FlSpot(cumulativeDist, alt));
@@ -1300,7 +1305,7 @@ class _SummaryScreenState extends State<SummaryScreen>
           // (4) 그래프 바깥 오른쪽 하단에 "km" 표시
           Positioned(
             right: 0,
-            bottom: 0,
+            bottom: -5,
             child: Text(
               "km",
               style: TextStyle(fontSize: 12, color: Colors.black),
