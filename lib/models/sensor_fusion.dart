@@ -88,7 +88,7 @@ class SensorFusion {
     if (ba == null && ga == null) return null;
     if (ba != null && ga != null) {
       // 예: 70% baro + 30% gps
-      return 0.7 * ba + 0.3 * ga;
+      return 0.6 * ba + 0.4 * ga;
     }
     return ba ?? ga;
   }

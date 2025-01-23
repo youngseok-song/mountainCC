@@ -182,6 +182,7 @@ class MapScreenState extends State<MapScreen> {
 
     // (1) UI 상태: 운동 준비 중 표시 + resetAll()
     setState(() {
+      widget.locationService.lastSavedPosition = null;
       _isStartingWorkout = true;
       _isPreparing = true;  // “준비 중” 상태
       _movementService.resetAll();
